@@ -144,12 +144,12 @@ class model_bufferstock():
 
                 # Omega is maximum guarenteed repayable debt in period t
                 if t >= par.Tr:
-                    Omega = 0  # No debt in retirement
+                    Omega = 0 # No debt in retirement
                 else: 
                     Omega = par.R**(-1) * (Omega+xi_min) * par.G * par.L[t] * psi_min # Maximum debt in period t guarenteed to be repaid
-                
+
                 # Use binding borrowing constraint
-                par.a_min[t]= -min(Omega,par.lambdaa)
+                par.a_min[t]= max((-1)*Omega,(-1)*par.lambdaa)
         
         #### 4. End of period assets (a grid) ####
 
