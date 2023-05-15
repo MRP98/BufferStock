@@ -2,6 +2,7 @@
 from types import SimpleNamespace
 import numpy as np
 import tools
+from scipy.interpolate import griddata
 
 class model_bufferstock():
 
@@ -55,7 +56,7 @@ class model_bufferstock():
         #### 3. Numerical integration and grids ####
 
         ## a_grid settings
-        par.Na = 50 # number of points in grid for a
+        par.Na = 10 # number of points in grid for a
         par.a_max = 20 # maximum point in grid for a
         par.a_phi = 1.1 # Spacing in grid 
 
@@ -107,7 +108,7 @@ class model_bufferstock():
         par.grid_c = np.nan + np.zeros([par.T,par.Na+1])
         par.grid_d = np.nan + np.zeros([par.T,par.Na+1])
         par.grid_w = np.nan + np.zeros([par.T,par.Na+1])
-        
+
         for t in range(par.T):
             par.grid_c[t,:] = np.linspace(0,1,par.Na+1)
             par.grid_d[t,:] = np.linspace(0,par.a_max,par.Na+1)
@@ -115,7 +116,7 @@ class model_bufferstock():
         
         #### 5. Set seed ####
         
-        np.random.seed(2020)
+        np.random.seed(2022)
 
 
 
@@ -132,7 +133,7 @@ class model_bufferstock():
         shape=(par.T,par.Na+1)
         sol.c = np.zeros(shape)
         sol.d = np.zeros(shape)
-        sol.v = np.zeros(shape)
+        sol.v = np.zeros((par.T, par.Na+1, 2))
         sol.grid_w = np.zeros(shape)
         
         # Last period, (= consume all) 
@@ -148,14 +149,15 @@ class model_bufferstock():
 
                 sol.grid_w[t,:] = par.grid_w[t,:]
 
-                d = par.grid_d[t,:]
-
-
                 for iw, w in enumerate(sol.grid_w[t,:]):
                     
-                    c = par.grid_c[t,:]*w  + d
+                    w_d = w + d
+
+                    c = par.grid_c[t,:]*w_d  
+
+                    d_plus = d
                     
-                    w_c_d = w - c
+                    w_d_c = w_d - c
 
                     EV_next = 0
 
@@ -164,16 +166,15 @@ class model_bufferstock():
                         weight = par.xi_w_vec[s] / par.Neps
                         xi = par.xi_vec[s]
 
-                        
-                        EV_next += weight*np.interp(w_c_d + xi, sol.grid_w[t+1,:], sol.v[t+1,:])
+                        EV_next += weight*tools.interp_2d(par.grid_w[t,:], par.grid_d[t,:], sol.v[t+1,:], w, d_plus)
 
                     v_guess = np.sqrt(c) + par.beta * EV_next
 
-                    index = np.argmax(v_guess)
+                    index = np.unravel_index(v_guess.argmax(), v_guess.shape)
+                    if t == 50:
+                        print(index)
 
-                    sol.d[t, id] = d[index]
-
-                    sol.c[t, iw] = c[index]
+                    sol.c[t, id, iw] = c[index[0]]
 
                     sol.v[t, iw] = np.amax(v_guess)
 
