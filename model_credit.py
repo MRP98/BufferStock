@@ -54,7 +54,7 @@ class model_bufferstock():
         #### 3. Numerical integration and grids ####
 
         ## a_grid settings
-        par.Na = 50 # number of points in grid for a
+        par.Na = 100 # number of points in grid for a
         par.a_max = 5.0 # maximum point in grid for a
         par.d_max = 0.5 # maximum new debt
         par.n_max = 5.0 # maximum debt
@@ -142,6 +142,8 @@ class model_bufferstock():
         # Loop through all but the last period
         for t in range(par.T-2,-1,-1):
 
+            sol.grid_w[t,:] = par.grid_w[t+1,:]
+            sol.grid_n[t,:] = par.grid_n[t+1,:]
             c_share = par.grid_c[t,:]        
             d = par.grid_d[t,:]              
 
@@ -168,13 +170,13 @@ class model_bufferstock():
                             EV_next += weight*np.interp(w_d_c + xi, sol.grid_w[t+1,:], sol.v[t+1,:])
                     
                     else:
-                        f_interp = interp2d(sol.grid_w[t+1,:], sol.grid_n[t+1,:], sol.v[t+1,:,:], kind='linear')
+                        f_interp = interp2d(par.grid_w[t+1,:], par.grid_n[t+1,:], sol.v[t+1,:,:], kind='linear')
                         EV_next = f_interp(w_d_c, n_d)
                     
                     v_guess = np.sqrt(c) + par.beta * EV_next            # Value function
                     flat_index = v_guess.argmax()                        # Find index of highest flat v_guess
-                    index = np.unravel_index(flat_index, v_guess.shape)  # Convert flat index to normal matrix index
-                    
+                    index = np.unravel_index(flat_index, (v_guess.shape[0], v_guess.shape[1]))  # Convert flat index to normal matrix index
+
                     sol.c[t, i_w, i_n] = w_d[index[0]] - w_d_c[index[0]] # Find consumption of that index
                     sol.d[t, i_w, i_n] = n_d[index[1]] - n               # Find debt of that index
                     sol.v[t, i_w, i_n] = np.amax(v_guess)
