@@ -65,17 +65,17 @@ class model_bufferstock():
                     w_d[i_d,:] += d
                 c = w_d * grid_c    
                 w_d_c = w_d - c       
-                EV_next = 0      
+                V_next = 0      
 
                 if t<par.T-1:
-                    EV_next = np.interp(w_d_c, sol.grid_w[t+1,:], sol.v[t+1,:])
+                    V_next = np.interp(w_d_c, sol.grid_w[t+1,:], sol.v[t+1,:])
                 
-                v_guess = np.sqrt(c) + par.beta * EV_next
+                v_guess = np.sqrt(c) + par.beta * V_next
                 index_ = v_guess.argmax()                        
-                index = np.unravel_index(index_, v_guess.shape)                                        
+                index = np.unravel_index(index_, v_guess.shape)                                      
 
                 sol.c[t, i_w] = c[index[0],index[1]]
-                sol.d[t, i_w] = grid_d[index[1]]
+                sol.d[t, i_w] = grid_d[index[0]]
                 sol.v[t, i_w] = np.amax(v_guess)
 
         return sol
