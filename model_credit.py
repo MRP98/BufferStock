@@ -2,7 +2,7 @@
 from types import SimpleNamespace
 import numpy as np
 import tools
-from scipy.interpolate import griddata
+from scipy.interpolate import interp2d
 
 class model_bufferstock():
 
@@ -26,27 +26,25 @@ class model_bufferstock():
         #### 1. Basic parameters ####
 
         # Demograhpics
-        par.T = 160 # Terminal age
+        par.T = 5 # Terminal age
 
         # Preferences
         par.rho = 3 # CRRA parameter
-        par.beta = 0.90 # Discount factor
+        par.beta = 0.9 # Discount factor
 
         # Income parameters
-        par.Gamma = 1.02 # Age-invariant deterministic drift in income
-        
-        par.sigma_xi = 0.01*4 # Transitory shock
-        par.sigma_psi = 0.01*(4/11) # Permanent shock
-        
+        par.Gamma = 1.02 # Deterministic drift in income
         par.u_prob = 0.07 # Probability of unemployment
         par.low_val = 0.30 # Negative shock if unemployed (Called mu in paper) 
+        par.sigma_xi = 0.01*4 # Transitory shock
+        par.sigma_psi = 0.01*(4/11) # Permanent shock
 
         # Saving and borrowing
         par.r_a = -1.0148 # Return on savings
         par.r_d_r_a = 1.1236
         par.varpsi = 0.74
         par.eta = 0
-        par.lambdaa = 0.03  # Maximum borrowing limit
+        par.lambdaa = 0.03 # Maximum borrowing limit
 
         # Credit risk
         par.pi_lose = 0.0263
@@ -56,14 +54,14 @@ class model_bufferstock():
         #### 3. Numerical integration and grids ####
 
         ## a_grid settings
-        par.Na = 10 # number of points in grid for a
-        par.a_max = 20 # maximum point in grid for a
-        par.a_phi = 1.1 # Spacing in grid 
+        par.Na = 50 # number of points in grid for a
+        par.a_max = 5.0 # maximum point in grid for a
+        par.d_max = 0.5 # maximum new debt
+        par.n_max = 5.0 # maximum debt
 
         ## Shock grid settings
         par.Neps = 8 # number of quadrature points for eps
         par.Npsi = 8 # number of quadrature points for psi
-
 
     def create_grids(self):
         
@@ -73,7 +71,6 @@ class model_bufferstock():
 
         assert (par.rho >= 0), 'not rho > 0'
         assert (par.lambdaa >= 0), 'not lambda > 0'
-
 
         #### 2. Shocks ####
 
@@ -87,7 +84,6 @@ class model_bufferstock():
         if par.u_prob > 0:
             par.xi =  np.append(par.low_val+1e-8, (eps-par.u_prob*par.low_val)/(1-par.u_prob), axis=None) # +1e-8 makes it possible to take the log in simulation if low_val = 0
             par.xi_w = np.append(par.u_prob, (1-par.u_prob)*eps_w, axis=None)
-            
         
         else: # If no discrete shock then xi=eps
             par.xi = eps
@@ -104,78 +100,83 @@ class model_bufferstock():
         assert (1-sum(par.w) < 1e-8), 'the weights does not sum to 1'
         par.Nshocks = par.w.size    # count number of shock nodes
         
-        # 3. Insert some form of grid i guess????
-        par.grid_c = np.nan + np.zeros([par.T,par.Na+1])
-        par.grid_d = np.nan + np.zeros([par.T,par.Na+1])
-        par.grid_w = np.nan + np.zeros([par.T,par.Na+1])
+        #### 3. Initialize grids ####
+
+        par.grid_c = np.nan + np.zeros([par.T,par.Na])          # choice variable
+        par.grid_d = np.nan + np.zeros([par.T,par.Na])          # choice variable
+        par.grid_w = np.nan + np.zeros([par.T,par.Na])          # state variable
+        par.grid_n = np.nan + np.zeros([par.T,par.Na])          # state variable
 
         for t in range(par.T):
-            par.grid_c[t,:] = np.linspace(0,1,par.Na+1)
-            par.grid_d[t,:] = np.linspace(0,par.a_max,par.Na+1)
-            par.grid_w[t,:] = np.linspace(0,par.a_max,par.Na+1)               
+            par.grid_c[t,:] = np.linspace(0,1,par.Na)           # choice variable
+            par.grid_d[t,:] = np.linspace(0,par.d_max,par.Na)   # choice variable
+            par.grid_w[t,:] = np.linspace(0,par.a_max,par.Na)   # state variable
+            par.grid_n[t,:] = np.linspace(0,par.n_max,par.Na)   # state variable               
         
         #### 5. Set seed ####
         
         np.random.seed(2022)
 
-
-
     #############
     ### solve ###
     #############
 
-    def solve(self):
+    def solve(self,shocks=False):
 
         # Initialize
         sol = self.sol
         par = self.par
 
-        shape=(par.T,par.Na+1)
-        sol.c = np.zeros(shape)
-        sol.d = np.zeros(shape)
-        sol.v = np.zeros((par.T, par.Na+1, 2))
-        sol.grid_w = np.zeros(shape)
+        sol.v = np.zeros((par.T,par.Na,par.Na))        
+        sol.c = np.zeros((par.T,par.Na,par.Na))
+        sol.d = np.zeros((par.T,par.Na,par.Na))
+        sol.grid_w = np.zeros((par.T,par.Na))
+        sol.grid_n = np.zeros((par.T,par.Na))
         
-        # Last period, (= consume all) 
-        sol.c[par.T-1,:] = np.linspace(0,par.a_max,par.Na+1)
-        sol.d[par.T-1,:] = np.linspace(0,par.a_max,par.Na+1)
+        # Last period
+        for i,w in enumerate(par.grid_w):
+            sol.c[par.T-1,i,:] = np.linspace(0,i+par.n_max,par.Na) # Consume all
+            sol.d[par.T-1,i,:] = np.linspace(0,par.d_max,par.Na) # Take max debt
+            sol.v[par.T-1,i,:] = np.sqrt(sol.c[par.T-1,i,:]) # Value in last period
 
-
-        # Before last period
+        # Loop through all but the last period
         for t in range(par.T-2,-1,-1):
-            
-            # Solve model with EGM
-            for id, d in enumerate(par.grid_d[t,:]):
 
-                sol.grid_w[t,:] = par.grid_w[t,:]
+            c_share = par.grid_c[t,:]        
+            d = par.grid_d[t,:]              
 
-                for iw, w in enumerate(sol.grid_w[t,:]):
+            # Loop over state variable, n
+            for i_n, n in enumerate(par.grid_n[t,:]):    
+
+                # Loop over state variable, w
+                for i_w, w in enumerate(par.grid_w[t,:]):
+
+                    n_d = n + d       # Debt in next period         
+                    w_d = w + n_d     # Assets in current period      
+                    c = c_share * w_d # Consumption in current period      
+                    w_d_c = w_d - c   # Assets in next period     
+                    EV_next = 0       # Initialize EV_next 
+
+                    if shocks == True:
+
+                        # Loop over possible shocks - udgår foreløbigt
+                        for s in range(len(par.xi_vec)):
+
+                            weight = par.xi_w_vec[s] / par.Neps # Weight of shock = probability of shock
+                            xi = par.xi_vec[s]                  # Size of shock
+
+                            EV_next += weight*np.interp(w_d_c + xi, sol.grid_w[t+1,:], sol.v[t+1,:])
                     
-                    w_d = w + d
-
-                    c = par.grid_c[t,:]*w_d  
-
-                    d_plus = d
+                    else:
+                        f_interp = interp2d(sol.grid_w[t+1,:], sol.grid_n[t+1,:], sol.v[t+1,:,:], kind='linear')
+                        EV_next = f_interp(w_d_c, n_d)
                     
-                    w_d_c = w_d - c
-
-                    EV_next = 0
-
-                    for s in range(len(par.xi_vec)):
-
-                        weight = par.xi_w_vec[s] / par.Neps
-                        xi = par.xi_vec[s]
-
-                        EV_next += weight*tools.interp_2d(par.grid_w[t,:], par.grid_d[t,:], sol.v[t+1,:], w, d_plus)
-
-                    v_guess = np.sqrt(c) + par.beta * EV_next
-
-                    index = np.unravel_index(v_guess.argmax(), v_guess.shape)
-                    if t == 50:
-                        print(index)
-
-                    sol.c[t, id, iw] = c[index[0]]
-
-                    sol.v[t, iw] = np.amax(v_guess)
+                    v_guess = np.sqrt(c) + par.beta * EV_next            # Value function
+                    flat_index = v_guess.argmax()                        # Find index of highest flat v_guess
+                    index = np.unravel_index(flat_index, v_guess.shape)  # Convert flat index to normal matrix index
+                    
+                    sol.c[t, i_w, i_n] = w_d[index[0]] - w_d_c[index[0]] # Find consumption of that index
+                    sol.d[t, i_w, i_n] = n_d[index[1]] - n               # Find debt of that index
+                    sol.v[t, i_w, i_n] = np.amax(v_guess)
 
         return sol
