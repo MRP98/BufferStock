@@ -104,15 +104,15 @@ class model_bufferstock():
 
         par.grid_d = np.ones((par.T,par.Na))   
 
-        # for t in range(par.T):
-        #     if t == 0:
-        #         pass
+        for t in range(par.T):
+            if t == 0:
+                pass
 
-        #     elif t == par.T-1:
-        #         par.grid_d[t] = par.grid_d[t-1]*0
+            elif t == par.T-1:
+                par.grid_d[t] = par.grid_d[t-1]*0
 
-        #     else:
-        #         par.grid_d[t] = par.grid_d[t-1]*(1-par.lambdaa)
+            else:
+                par.grid_d[t] = par.grid_d[t-1]*(1-par.lambdaa)
 
 
     #############
@@ -150,6 +150,10 @@ class model_bufferstock():
             # Loop over state variable, w
             for i_w, w in enumerate(grid_w):
                 
+
+                # Insert permanent income
+                                                                           
+
                 w_d[:,:] = w + par.grid_p[t,:]
 
                 for i_d, d in enumerate(par.grid_d[t]):
@@ -158,28 +162,30 @@ class model_bufferstock():
 
                     w_d[i_d,:] += d_max - par.r_d * sol.d[t, :] + par.r_w * w_d[i_d,:]
 
-                c = w_d * grid_c
-                w_d_c = w_d - c       
-                V_next = 0      
+                    c = w_d * grid_c
+                    w_d_c = w_d - c       
+                    V_next = 0      
 
-                if t<par.T-1:
-                    
-                    for s in range(len(par.xi_vec)):
+                    if t<par.T-1:
                         
-                        weight = par.w[s] # Weight of shock = probability of shock
+                        for s in range(len(par.xi_vec)):
+                            
+                            weight = par.w[s] # Weight of shock = probability of shock
 
-                        xi = par.xi_vec[s]                  # Size of shock
+                            xi = par.xi_vec[s]                  # Size of shock
 
-                        V_next += weight*np.interp(w_d_c + xi, sol.grid_w[t+1,:], sol.v[t+1,:])
-            
-                v_guess = (c**(1-par.rho)-1)/(1-par.rho) + par.beta * V_next
-                index_ = v_guess.argmax()                        
-                index = np.unravel_index(index_, v_guess.shape)
-              
+                            V_next += weight*np.interp(w_d_c + xi, sol.grid_w[t+1,:], sol.v[t+1,:])
+                
+                    v_guess = (c**(1-par.rho)-1)/(1-par.rho) + par.beta * V_next
+                    index_ = v_guess.argmax()                        
+                    index = np.unravel_index(index_, v_guess.shape)
 
-                sol.c[t, i_w] = c[index[0],index[1]]
-                sol.d[t, i_w] = par.grid_d[t,:][index[0]]
+                    # Juster grid optimal D
+                                    
 
-                sol.v[t, i_w] = np.amax(v_guess)
+                    sol.c[t, i_w] = c[index[0],index[1]]
+                    sol.d[t, i_d] = par.grid_d[t,:][index[0]]
+
+                    sol.v[t, i_w] = np.amax(v_guess)
 
         return sol
