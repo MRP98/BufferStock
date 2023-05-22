@@ -21,14 +21,15 @@ class model_bufferstock():
         par = self.par
 
         # Preferences
-        par.rho = 3 # CRRA parameter
+        par.rho = 2 # CRRA parameter
         par.beta = 0.9 # Discount factor
 
         # Grid points
-        par.T = 10           # Terminal age
+        par.T = 50           # Terminal age
         par.Na = 50        # Number of points in grid for w
         par.a_max = 5.0     # Maximum point in grid for w
         par.d_max = 1     # Maximum new debt
+        par.w_max = 10
 
 
         # Income parameters
@@ -83,12 +84,13 @@ class model_bufferstock():
         assert (1-sum(par.w) < 1e-8), 'the weights does not sum to 1'
         par.Nshocks = par.w.size    # count number of shock nodes
 
-        par.grid_p = np.ones((par.T,par.Na))   
+        par.grid_p = np.ones(par.T)   
 
         for t in range(par.T): 
-            par.grid_p[t,:] = par.grid_p[t-1,:]*1.02
+            par.grid_p[t] = par.grid_p[t-1]*1.02
 
-        # Try to make Gauss Hermite shocks
+
+        #Try to make Gauss Hermite shocks
         # for t in range(par.T): 
         #     if t == 0:
         #         pass
@@ -102,7 +104,7 @@ class model_bufferstock():
         #             par.grid_p[t,:] += weight*(par.grid_p[t-1,:])*par.psi_vec[s]
 
 
-        par.grid_d = np.ones((par.T,par.Na))   
+        # par.grid_d = np.ones((par.T,par.Na))   
 
         # for t in range(par.T):
         #     if t == 0:
@@ -119,7 +121,7 @@ class model_bufferstock():
     ### solve ###
     #############
 
-    def solve(self,shocks=False):
+    def solve(self,shocks=True, debt=True):
 
         # Initialize
         sol = self.sol
@@ -127,40 +129,51 @@ class model_bufferstock():
 
         # Solutions
         sol.grid_w = np.zeros((par.T,par.Na))
-        sol.d = np.zeros((par.T,par.Na))
+        sol.d = np.ones((par.T,par.Na))
+        sol.d_temp = np.ones((par.T,par.Na))
         sol.c = np.zeros((par.T,par.Na))
         sol.v = np.zeros((par.T,par.Na))
+
              
 
         # Grids
-        grid_w = np.linspace(0,par.a_max,par.Na)
+        par.grid_w = np.linspace(0,par.a_max,par.Na)
         
         grid_c = np.linspace(0,1,par.Na)
-
+        par.grid_d = np.linspace(0,par.d_max,par.Na)
         w_d = np.zeros((par.Na,par.Na))
 
         # Loop through all but the last period
         for t in range(par.T-1,-1,-1):      
             
-            w_max = par.d_max*t+par.a_max
-            grid_w = np.linspace(0,w_max,par.Na) 
-            sol.grid_w[t,:] = grid_w         
+            par.grid_w = np.linspace(0,par.w_max,par.Na) 
+            sol.grid_w[t,:] = par.grid_w         
 
 
             # Loop over state variable, w
-            for i_w, w in enumerate(grid_w):
+            for i_w, w in enumerate(par.grid_w):
                 
-                w_d[:,:] = w + par.grid_p[t,:]
 
-                for i_d, d in enumerate(par.grid_d[t]):
+                # Insert permanent income
+                                                                           
+
+                w_d[:,:] = w                
+
+
+                for i_d, d in enumerate(par.grid_d):
                     
-                    d_max = max((1-par.lambdaa)*sol.d[t, i_d], par.phi*par.grid_p[t,0])
+                    sol.d_temp[t,i_d] = par.phi*par.grid_p[t]*d
 
-                    w_d[i_d,:] += d_max - par.r_d * sol.d[t, :] + par.r_w * w_d[i_d,:]
+                    if debt == True:
+                        w_d[i_d,:] += sol.d_temp[t,i_d]
+
+                    else:
+                        w_d[i_d,:] += 0
 
                 c = w_d * grid_c
                 w_d_c = w_d - c       
-                V_next = 0      
+                V_next = 0 
+
 
                 if t<par.T-1:
                     
@@ -170,15 +183,22 @@ class model_bufferstock():
 
                         xi = par.xi_vec[s]                  # Size of shock
 
-                        V_next += weight*np.interp(w_d_c + xi, sol.grid_w[t+1,:], sol.v[t+1,:])
+                        if shocks == True:
+                            V_next += weight*np.interp(w_d_c + xi, sol.grid_w[t+1,:], sol.v[t+1,:])
+
+                        else:
+                            V_next += weight*np.interp(w_d_c, sol.grid_w[t+1,:], sol.v[t+1,:])
             
                 v_guess = (c**(1-par.rho)-1)/(1-par.rho) + par.beta * V_next
                 index_ = v_guess.argmax()                        
                 index = np.unravel_index(index_, v_guess.shape)
-              
+
+
+                # Juster grid optimal D
+                                
 
                 sol.c[t, i_w] = c[index[0],index[1]]
-                sol.d[t, i_w] = par.grid_d[t,:][index[0]]
+                sol.d[t, i_w] = sol.d_temp[t][index[0]]
 
                 sol.v[t, i_w] = np.amax(v_guess)
 
