@@ -3,7 +3,7 @@ from numba import njit, int64, double, boolean, int32,void
 import math
 
 # interpolation functions:
-@njit(int64(int64,int64,double[:],double))
+
 def binary_search(imin,Nx,x,xi):
         
     # a. checks
@@ -23,7 +23,6 @@ def binary_search(imin,Nx,x,xi):
         
     return imin
 
-@njit(double(double[:],double[:],double))
 def interp_linear_1d_scalar(grid,value,xi):
     """ raw 1D interpolation """
 
@@ -48,7 +47,6 @@ def interp_linear_1d(grid,value,xi):
     
     return yi
 
-@njit(double(double[:],double[:],double[:,:],double,double,int32,int32),fastmath=True)
 def _interp_2d(grid1,grid2,value,xi1,xi2,j1,j2):
     """ Code is from: https://github.com/NumEconCopenhagen/ConsumptionSaving, and the package can be downloaded
     
@@ -84,7 +82,6 @@ def _interp_2d(grid1,grid2,value,xi1,xi2,j1,j2):
 
     return nom/denom
 
-@njit(double(double[:],double[:],double[:,:],double,double),fastmath=True)
 def interp_2d(grid1,grid2,value,xi1,xi2):
     """ Code is from: https://github.com/NumEconCopenhagen/ConsumptionSaving, and the package can be downloaded
 
@@ -107,7 +104,6 @@ def interp_2d(grid1,grid2,value,xi1,xi2):
 
     return _interp_2d(grid1,grid2,value,xi1,xi2,j1,j2)
 
-@njit(double[:](double[:],double[:],double[:,:],double[:],double[:]),fastmath=True)
 def interp_2d_vec(grid1,grid2,value,xi1,xi2):
     """ Code is from: https://github.com/NumEconCopenhagen/ConsumptionSaving, and the package can be downloaded
 
@@ -126,7 +122,7 @@ def interp_2d_vec(grid1,grid2,value,xi1,xi2):
     yi = np.nan+np.zeros(shape)
 
     for i in range(xi1.size):
-        yi[i] = interp_2d(grid1,grid2,value,xi1[i],xi2[i])
+        yi[i] = interp_2d(grid1,grid2,value,xi1[i],xi2)
 
     return yi
 
