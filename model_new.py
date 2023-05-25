@@ -22,14 +22,14 @@ class model_bufferstock():
 
         # Preferences
         par.T = 10          # Terminal age
-        par.beta = 0.99     # Discount factor
+        par.beta = 0.90     # Discount factor
 
         # Debt
-        par.r_d = 0.02      # Interest
+        par.r_d = 0.03      # Interest
         par.lambdaa = 0.05  # Installment
       
         # Grids
-        par.N = 30          # Number of points in grids
+        par.N = 10          # Number of points in grids
         par.w_max = 4.0     # Maximum cash on hand
         par.n_max = 2.0     # Maximum total debt
 
@@ -56,7 +56,7 @@ class model_bufferstock():
 
         # Maximal new debt, d
         def d_max(n,t):
-            if t > 5:
+            if t > 140:
                 d_max = 0
             else:
                 d_max = max((par.n_max-n),0)
@@ -76,42 +76,30 @@ class model_bufferstock():
                     sol.grid_w[t,:] = grid_w 
                     sol.grid_n[t,:] = grid_n
 
-                    # Solutions for given new debt, d
-                    c_d = np.zeros(par.N)
-                    V_d = np.zeros(par.N)
-
                     # Maximal new debt given n
                     grid_d = np.linspace(0,d_max(n,t),par.N)
 
-                    # Loop over desicion variable, d
-                    for i_d, d in enumerate(grid_d):
+                    V_next = np.zeros(par.N)
 
-                        V_next = np.zeros(par.N)
- 
-                        w_d = w + d         # Starting cash on hand
-                        c = w_d * grid_c    # Current consumption     
-                        w_d_c = w_d - c     # Ending cash on hand
-                        
-                        if t<par.T-1:
+                    w_d = w + grid_d         # Starting cash on hand
+                    c = w_d * grid_c    # Current consumption     
+                    w_d_c = w_d - c     # Ending cash on hand
+                    
+                    if t<par.T-1:
 
-                            # Value function in next period
-                            interest = par.r_d * (n + d)
-                            installment = par.lambdaa * (n + d)
-                            w_next = w_d_c - installment - interest
-                            n_next = n + d
+                        # Value function in next period
+                        interest = par.r_d * (n + grid_d)
+                        installment = par.lambdaa * (n + grid_d)
+                        w_next = w_d_c - installment - interest
+                        n_next = n + grid_d
 
-                            V_next = tools.interp_2d_vec(sol.grid_w[t+1,:], sol.grid_n[t+1,:], sol.v[t+1,:,:], w_next, n_next)
-                
-                        # Find solution for given new debt, d
-                        V_guess = np.sqrt(c) + par.beta * V_next
-                        index = V_guess.argmax()
-                        V_d[i_d] = V_next[index]
-                        c_d[i_d] = c[index]
+                        V_next = tools.interp_2d_vec(sol.grid_n[t+1,:], sol.grid_w[t+1,:], sol.v[t+1,:,:], n_next, w_next)
+            
+                    # Find solution for given new debt, d
+                    V_guess = np.sqrt(c) + par.beta * V_next
 
-                    # Final solution
-                    V_guess = np.sqrt(c_d) + par.beta * V_d
                     index = V_guess.argmax()
 
-                    sol.c[t,i_w,i_n] = c_d[index]
-                    sol.d[t,i_w,i_n] = grid_d[index]
-                    sol.v[t,i_w,i_n] = np.amax(V_guess)  
+                    sol.c[t,i_n,i_w] = c[index]
+                    sol.d[t,i_n,i_w] = grid_d[index]
+                    sol.v[t,i_n,i_w] = np.amax(V_guess)  
