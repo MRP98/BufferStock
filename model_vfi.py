@@ -22,22 +22,24 @@ class model_bufferstock():
 
         # Preferences
         par.T = 10          # Terminal age
-        par.beta = 0.99     # Discount factor
+        par.beta = 0.90     # Discount factor
 
         # Debt
-        par.r_d = 0.02      # Interest
-        par.lambdaa = 0.05  # Installment
+        par.r_w = 0.015
+        par.r_d = 0.07      # Interest
+        par.lambdaa = 0.03  # Installment
+        par.varphi = 0.74
       
         # Grids
         par.N = 30          # Number of points in grids
-        par.w_max = 4.0     # Maximum cash on hand
-        par.n_max = 2.0     # Maximum total debt
+        par.w_old_max = 4.0     # Maximum cash on hand
+        par.d_old_max = 0.74     # Maximum total debt
 
         # Income parameters
         par.Gamma = 1.02 # Deterministic drift in income
         par.u_prob = 0.07 # Probability of unemployment
-        par.low_val = 0.30 # Negative shock if unemployed (Called mu in paper) 
-        par.sigma_xi = 0.01*4 # Transitory shock
+        par.low_val = 0.03 # Negative shock if unemployed (Called mu in paper) 
+        par.sigma_xi = 0.02 # Transitory shock
         par.sigma_psi = 0.00005 # Permanent shock
 
         ## Shock grid settings
@@ -89,61 +91,64 @@ class model_bufferstock():
         par = self.par
 
         # Solutions
-        sol.grid_w = np.zeros((par.T,par.N))
-        sol.grid_n = np.zeros((par.T,par.N))
+        sol.grid_w_old = np.zeros((par.T,par.N))
+        sol.grid_d_old = np.zeros((par.T,par.N))
         sol.d = np.zeros((par.T,par.N,par.N))
         sol.c = np.zeros((par.T,par.N,par.N))
         sol.v = np.zeros((par.T,par.N,par.N))    
 
         # Grids
-        grid_n = np.linspace(0,par.n_max,par.N)
-        grid_c = np.linspace(0,1,par.N)
+        grid_d_old = np.linspace(0,par.varphi,par.N)
+        grid_c = np.linspace(0.0,1,par.N)
 
-        # Maximal new debt, d
-        def d_max(n,t):
-            if t > 5:
+        # # Maximal new debt, d
+        def d_max(t):
+            if t > 80:
                 d_max = 0
             else:
-                d_max = max((par.n_max-n),0)
+                d_max = par.varphi
             return d_max
 
         # Loop over periods, t
         for t in range(par.T-1,-1,-1):                          
 
             # Loop over state variable, n
-            for i_n, n in enumerate(grid_n):
+            for i_n, d_old in enumerate(grid_d_old):
 
-                grid_w = np.linspace(0,par.w_max-n,par.N)
+                grid_w_old = np.linspace(0,par.w_old_max,par.N)
     
                 # Loop over state variable, w
-                for i_w, w in enumerate(grid_w):
+                for i_w, w_old in enumerate(grid_w_old):
                     
-                    sol.grid_w[t,:] = grid_w 
-                    sol.grid_n[t,:] = grid_n
+                    sol.grid_w_old[t,:] = grid_w_old 
+                    sol.grid_d_old[t,:] = grid_d_old
 
                     # Solutions for given new debt, d
-                    c_d = np.zeros(par.N)
-                    V_d = np.zeros(par.N)
+                    c_given_d = np.zeros(par.N)   #Consumption conditional on optimal debt in period t
+                    v_next_given_debt = np.zeros(par.N)   #Value function conditional on optimal debt in period t
 
                     # Maximal new debt given n
-                    grid_d = np.linspace(0,d_max(n,t),par.N)
+                    grid_d = np.linspace(0,par.varphi,par.N)
 
-                    # Loop over desicion variable, d
+                    # Loop over decision variable, d
                     for i_d, d in enumerate(grid_d):
 
                         V_next = np.zeros(par.N)
- 
-                        w_d = w + d         # Starting cash on hand
-                        c = w_d * grid_c    # Current consumption     
-                        w_d_c = w_d - c     # Ending cash on hand
+
+                        d_next = d * (0.05*(1-par.lambdaa)*d_old + 0.95*par.varphi) * np.ones(par.N) / par.Gamma
+
+                        # Value function in next period
+                        interest = par.r_d * d_old
+                        installment = par.lambdaa * d_old
+                        remaining_debt = d_next - (1-par.lambdaa)*d_old 
+                        y = par.Gamma 
+                        w_d = ((1 + par.r_w)*w_old + y - installment - interest + remaining_debt) / par.Gamma
+
+                        c = w_d * grid_c
+             
+                        w_next = w_d - c
                         
                         if t<par.T-1:
-
-                            # Value function in next period
-                            interest = par.r_d * (n + d)
-                            installment = par.lambdaa * (n + d)
-                            w_next = w_d_c - installment - interest
-                            n_next = n + d + np.zeros(par.N)
 
                             for s in range(len(par.xi_vec)):
                                 
@@ -152,18 +157,19 @@ class model_bufferstock():
                                 xi = par.xi_vec[s]                  # Size of shock
                                 psi = par.psi_vec[s]
 
-                                V_next += weight*tools.interp_2d_vec(sol.grid_n[t+1,:], sol.grid_w[t+1,:], sol.v[t+1,:,:], n_next, w_next*psi + xi)
+
+                                V_next += weight*tools.interp_2d_vec(sol.grid_d_old[t+1,:], sol.grid_w_old[t+1,:], sol.v[t+1,:,:], (d_next*1/psi), (w_next*1/psi) + xi)    
                 
                         # Find solution for given new debt, d
                         V_guess = np.sqrt(c) + par.beta * V_next
                         index = V_guess.argmax()
-                        V_d[i_d] = V_next[index]
-                        c_d[i_d] = c[index]
+                        v_next_given_debt[i_d] = V_next[index]
+                        c_given_d[i_d] = c[index]
 
                     # Final solution
-                    V_guess = np.sqrt(c_d) + par.beta * V_d
+                    V_guess = np.sqrt(c_given_d) + par.beta * v_next_given_debt
                     index = V_guess.argmax()
 
-                    sol.c[t, i_n, i_w] = c_d[index]
+                    sol.c[t, i_n, i_w] = c_given_d[index]
                     sol.d[t, i_n, i_w] = grid_d[index]
                     sol.v[t, i_n, i_w] = np.amax(V_guess)  
