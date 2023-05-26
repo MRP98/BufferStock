@@ -23,10 +23,11 @@ class model_bufferstock():
         # Preferences
         par.T = 10          # Terminal age
         par.beta = 0.90     # Discount factor
+        par.rho = 3
 
         # Debt
-        par.r_w = 0.015
-        par.r_d = 0.07      # Interest
+        par.r_w = 0.02
+        par.r_d = 0.10      # Interest
         par.lambdaa = 0.03  # Installment
         par.varphi = 0.74
       
@@ -110,7 +111,8 @@ class model_bufferstock():
             return d_max
 
         # Loop over periods, t
-        for t in range(par.T-1,-1,-1):                          
+        for t in range(par.T-1,-1,-1):
+            print("T =========== ", t)                          
 
             # Loop over state variable, n
             for i_n, d_old in enumerate(grid_d_old):
@@ -135,19 +137,19 @@ class model_bufferstock():
 
                         V_next = np.zeros(par.N)
 
-                        d_next = d * (0.05*(1-par.lambdaa)*d_old + 0.95*par.varphi) * np.ones(par.N) / par.Gamma
+                        d_next = d * (0.05*(1-par.lambdaa)*d_old + 0.95*par.varphi) * np.ones(par.N)
 
                         # Value function in next period
                         interest = par.r_d * d_old
                         installment = par.lambdaa * d_old
-                        remaining_debt = d_next - (1-par.lambdaa)*d_old 
-                        y = par.Gamma 
-                        w_d = ((1 + par.r_w)*w_old + y - installment - interest + remaining_debt) / par.Gamma
+                        remaining_debt = (1-par.lambdaa)*d_old 
+                        m = np.clip((1 + par.r_w)*w_old - installment - interest - remaining_debt + d_next + par.Gamma, a_min=0, a_max=None)
 
-                        c = w_d * grid_c
-             
-                        w_next = w_d - c
-                        
+                        c = m * grid_c 
+                      
+
+                        w_c = m - c
+                      
                         if t<par.T-1:
 
                             for s in range(len(par.xi_vec)):
@@ -157,17 +159,18 @@ class model_bufferstock():
                                 xi = par.xi_vec[s]                  # Size of shock
                                 psi = par.psi_vec[s]
 
+                                w_next = (1+par.r_w)*w_c - d_next*(par.r_d + par.lambdaa) + xi
 
-                                V_next += weight*tools.interp_2d_vec(sol.grid_d_old[t+1,:], sol.grid_w_old[t+1,:], sol.v[t+1,:,:], (d_next*1/psi), (w_next*1/psi) + xi)    
+                                V_next += weight*tools.interp_2d_vec(sol.grid_d_old[t+1,:], sol.grid_w_old[t+1,:], sol.v[t+1,:,:], d_next, w_next)    
                 
                         # Find solution for given new debt, d
-                        V_guess = np.sqrt(c) + par.beta * V_next
+                        V_guess = c**(1-par.rho)/(1-par.rho) + par.beta * V_next
                         index = V_guess.argmax()
                         v_next_given_debt[i_d] = V_next[index]
                         c_given_d[i_d] = c[index]
 
                     # Final solution
-                    V_guess = np.sqrt(c_given_d) + par.beta * v_next_given_debt
+                    V_guess = c_given_d**(1-par.rho)/(1-par.rho) + par.beta * v_next_given_debt
                     index = V_guess.argmax()
 
                     sol.c[t, i_n, i_w] = c_given_d[index]
