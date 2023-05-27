@@ -101,6 +101,8 @@ class model_bufferstock():
         # Grids
         grid_d_old = np.linspace(0,par.varphi,par.N)
         grid_c = np.linspace(0.0,1,par.N)
+        sol.grid_n = np.zeros((par.T,par.N))
+
 
         # # Maximal new debt, d
         def d_max(t):
@@ -118,9 +120,11 @@ class model_bufferstock():
             for i_n, d_old in enumerate(grid_d_old):
 
                 grid_w_old = np.linspace(0,par.w_old_max,par.N)
-    
+                
                 # Loop over state variable, w
                 for i_w, w_old in enumerate(grid_w_old):
+                    
+                    sol.grid_n[t,i_w] = w_old - d_old
                     
                     sol.grid_w_old[t,:] = grid_w_old 
                     sol.grid_d_old[t,:] = grid_d_old
@@ -130,14 +134,14 @@ class model_bufferstock():
                     v_next_given_debt = np.zeros(par.N)   #Value function conditional on optimal debt in period t
 
                     # Maximal new debt given n
-                    grid_d = np.linspace(0,par.varphi,par.N)
+                    grid_d = np.linspace(0,1,par.N)
 
                     # Loop over decision variable, d
                     for i_d, d in enumerate(grid_d):
 
                         V_next = np.zeros(par.N)
 
-                        d_next = d * (0.05*(1-par.lambdaa)*d_old + 0.95*par.varphi) * np.ones(par.N)
+                        d_next = d * (0.00*(1-par.lambdaa)*d_old + 1*par.varphi) * np.ones(par.N)
 
                         # Value function in next period
                         interest = par.r_d * d_old
@@ -146,8 +150,7 @@ class model_bufferstock():
                         m = np.clip((1 + par.r_w)*w_old - installment - interest - remaining_debt + d_next + par.Gamma, a_min=0, a_max=None)
 
                         c = m * grid_c 
-                      
-
+                        
                         w_c = m - c
                       
                         if t<par.T-1:
