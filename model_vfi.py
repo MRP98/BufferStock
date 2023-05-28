@@ -22,14 +22,14 @@ class model_bufferstock():
         par = self.par
 
         # Preferences
-        par.T = 5              # Terminal age
+        par.T = 10               # Terminal age
         par.beta = 0.90         # Discount factor
         par.rho = 3             # CRRA risk aversion
 
         # Debt
         par.r_w = 0.02          # Return on assets
-        par.r_d = 0.10          # Interest rate
-        par.lambdaa = 0.03      # Installment
+        par.r_d = 0.05          # Interest rate
+        par.lambdaa = 0.10      # Installment
         par.varphi = 0.74       # Maximal debt
       
         # Grids
@@ -68,7 +68,7 @@ class model_bufferstock():
         aux.grid_d_old = np.linspace(1e-8,par.varphi,par.N)
         aux.grid_c = np.linspace(1e-8,1,par.N)
         aux.grid_d = np.linspace(1e-8,1,par.N)
-        aux.grid_u = np.array([0,1])
+        aux.grid_u = np.array([1,0])
 
         aux.V_guess = np.zeros(par.N)
         aux.V_next = np.zeros(par.N)
@@ -179,7 +179,7 @@ class model_bufferstock():
         grid_d = aux.grid_d
 
         # Maximal attainable assets in period t
-        max_w = lambda t, d_old: par.w_old_max * par.Gamma ** t + max(par.xi_vec) * t + d_old
+        max_w = lambda t, d_old: par.w_old_max * par.Gamma ** t
 
         # Loop over periods, t
         for t in range(par.T-1,-1,-1):
@@ -189,7 +189,7 @@ class model_bufferstock():
             # Loop over state variable, d_old
             for i_d_, d_old in enumerate(grid_d_old):
 
-                grid_w_old = np.linspace(0, max_w(t,d_old), par.N)
+                grid_w_old = tools.nonlinspace(0, max_w(t,d_old), par.N, 1.5)
                 
                 # Loop over state variable, w_old
                 for i_w, w_old in enumerate(grid_w_old):
@@ -220,14 +220,24 @@ class model_bufferstock():
                             # Solutions
                             sol.c[t, i_d_, i_w, u] = aux.c[index] 
                             sol.d[t, i_d_, i_w, u] = aux.remaining_debt  
-                            sol.v[t, i_d_, i_w, u] = aux.V_guess[index]                
+                            sol.v[t, i_d_, i_w, u] = aux.V_guess[index]  
+
+                            if t > 5: 
+                                
+                                sol.c[t, i_d_, i_w, 0] = aux.c[index] 
+                                sol.d[t, i_d_, i_w, 0] = aux.remaining_debt  
+                                sol.v[t, i_d_, i_w, 0] = aux.V_guess[index]
+                                
+                                break              
 
                         # If employed <=> credit access
                         else:
 
                             # Loop over choice variable, d
                             for i_d, d in enumerate(grid_d):
-                                
+
+                                d_next = d * par.varphi * np.ones(par.N)
+                            
                                 # Solve Bellman
                                 d_next = d * par.varphi * np.ones(par.N)
                                 index = self.solve_bellman(w_old,d_next,t) 
