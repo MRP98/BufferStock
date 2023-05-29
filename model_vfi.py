@@ -59,6 +59,7 @@ class model_bufferstock():
         sol.grid_n = np.zeros((par.T,par.N))
         sol.grid_w_old = np.zeros((par.T,par.N))
         sol.grid_d_old = np.zeros((par.T,par.N))
+        sol.grid_m = np.zeros((par.T,par.N))
         sol.d = np.zeros((par.T,par.N,par.N,2))
         sol.c = np.zeros((par.T,par.N,par.N,2))
         sol.v = np.zeros((par.T,par.N,par.N,2))    
@@ -125,10 +126,13 @@ class model_bufferstock():
         V_next = np.zeros(par.N)
         
         # Cash on hand, consumption and assets
-        m_ = (1 + par.r_w)*w_old - installment - interest - remaining_debt + d_next + par.Gamma
+        m_ = (1 + par.r_w)*w_old - installment - interest + par.Gamma
         m = np.clip(m_, a_min=0, a_max=None) # Kan vi bare ignorere negative værdier?
-        c = m * grid_c 
-        w_c = m - c
+        
+        w = m + d_next - remaining_debt
+        
+        c = w * grid_c 
+        w_c = w - c
         
         # V_next = 0 in terminal period 
         if t<par.T-1:
@@ -138,18 +142,18 @@ class model_bufferstock():
                 
                 weight = par.w[s]   # Weight of shock = probability of shock
                 xi = par.xi_vec[s]  # Size of shock
-                w_next = (1+par.r_w)*w_c - d_next*(par.r_d + par.lambdaa) + xi
+                m_next = (1+par.r_w)*w_c - d_next*(par.r_d + par.lambdaa) + par.Gamma*xi
 
                 # Expected value next if unemployed
                 V_next_unemp += weight*tools.interp_2d_vec(sol.grid_d_old[t+1,:], 
                                                            sol.grid_w_old[t+1,:],
                                                            sol.v[t+1,:,:,1], # u = 1
-                                                           d_next, w_next) 
+                                                           d_next, m_next) 
                 # Expected value next if employed
                 V_next_emp += weight*tools.interp_2d_vec(sol.grid_d_old[t+1,:], 
                                                          sol.grid_w_old[t+1,:],
                                                          sol.v[t+1,:,:,0], # u = 0
-                                                         d_next, w_next)
+                                                         d_next, m_next)
                    
             # Final expected value next as weighted average
             V_next = par.u_prob * V_next_unemp + (1-par.u_prob) * V_next_emp
@@ -198,7 +202,7 @@ class model_bufferstock():
                     for u in grid_u:
 
                         sol.grid_u[t,:] = grid_u
-                        sol.grid_n[t,i_w] = w_old - d_old  
+
                         sol.grid_w_old[t,:] = grid_w_old 
                         sol.grid_d_old[t,:] = grid_d_old
                         
