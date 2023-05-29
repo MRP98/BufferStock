@@ -38,7 +38,7 @@ class model_bufferstock():
 
         # Income parameters
         par.Gamma = 1.02        # Deterministic drift in income
-        par.u_prob = 0.07       # Probability of unemployment
+        par.u_prob = 0.05       # Probability of unemployment
         par.low_val = 0.03      # Negative shock if unemployed (Called mu in paper) 
         par.sigma_xi = 0.02     # Transitory shock
         par.sigma_psi = 0.00005 # Permanent shock
@@ -68,7 +68,7 @@ class model_bufferstock():
         aux.grid_d_old = np.linspace(1e-8,par.varphi,par.N)
         aux.grid_c = np.linspace(1e-8,1,par.N)
         aux.grid_d = np.linspace(1e-8,1,par.N)
-        aux.grid_u = np.array([0,1])
+        aux.grid_u = np.array([1,0])
 
         aux.V_guess = np.zeros(par.N)
         aux.V_next = np.zeros(par.N)
@@ -138,7 +138,7 @@ class model_bufferstock():
                 
                 weight = par.w[s]   # Weight of shock = probability of shock
                 xi = par.xi_vec[s]  # Size of shock
-                w_next = w_c + xi
+                w_next = (1+par.r_w)*w_c - d_next*(par.r_d + par.lambdaa) + xi
 
                 # Expected value next if unemployed
                 V_next_unemp += weight*tools.interp_2d_vec(sol.grid_d_old[t+1,:], 
@@ -189,7 +189,7 @@ class model_bufferstock():
             # Loop over state variable, d_old
             for i_d_, d_old in enumerate(grid_d_old):
 
-                grid_w_old = np.linspace(0, max_w(t,d_old), par.N)
+                grid_w_old = np.linspace(0, par.w_old_max, par.N)
                 
                 # Loop over state variable, w_old
                 for i_w, w_old in enumerate(grid_w_old):
@@ -212,15 +212,24 @@ class model_bufferstock():
 
                         # If unemployed <=> no credit access
                         if u == 1: 
+                            
+                            for i_d, d in enumerate(grid_d):
+                        
+                                # Solve Bellman
+                                d_next = d * aux.remaining_debt  * np.ones(par.N)
+                                index = self.solve_bellman(w_old,d_next,t)
 
-                            # Solve Bellman
-                            d_next = aux.remaining_debt * np.ones(par.N)
-                            index = self.solve_bellman(w_old,d_next,t)
+                                # Temporary solutions
+                                c_given_d[i_d] = aux.c[index]
+                                v_next_given_d[i_d] = aux.V_next[index]
+
+                            V_guess = c_given_d**(1-par.rho)/(1-par.rho) + par.beta * v_next_given_d
+                            index = V_guess.argmax()
 
                             # Solutions
-                            sol.c[t, i_d_, i_w, u] = aux.c[index] 
-                            sol.d[t, i_d_, i_w, u] = aux.remaining_debt  
-                            sol.v[t, i_d_, i_w, u] = aux.V_guess[index]                
+                            sol.d[t, i_d_, i_w, u] = grid_d[index] * aux.remaining_debt 
+                            sol.c[t, i_d_, i_w, u] = c_given_d[index] 
+                            sol.v[t, i_d_, i_w, u] = V_guess[index]   
 
                         # If employed <=> credit access
                         else:
@@ -230,6 +239,7 @@ class model_bufferstock():
                                 
                                 # Solve Bellman
                                 d_next = d * par.varphi * np.ones(par.N)
+
                                 index = self.solve_bellman(w_old,d_next,t) 
 
                                 # Temporary solutions
@@ -239,7 +249,7 @@ class model_bufferstock():
                             # Final solutions
                             V_guess = c_given_d**(1-par.rho)/(1-par.rho) + par.beta * v_next_given_d
                             index = V_guess.argmax()
-                            
+
                             sol.d[t, i_d_, i_w, u] = grid_d[index] * par.varphi
                             sol.c[t, i_d_, i_w, u] = c_given_d[index]
                             sol.v[t, i_d_, i_w, u] = V_guess[index]
