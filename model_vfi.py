@@ -142,7 +142,8 @@ class model_bufferstock():
                 
                 weight = par.w[s]   # Weight of shock = probability of shock
                 xi = par.xi_vec[s]  # Size of shock
-                m_next = (1+par.r_w)*w_c - d_next*(par.r_d + par.lambdaa) + par.Gamma*xi
+                psi = par.psi_vec[s]
+                m_next = (1+par.r_w)*w_c - d_next*(par.r_d + par.lambdaa) + par.Gamma*xi*psi
 
                 # Expected value next if unemployed
                 V_next_unemp += weight*tools.interp_2d_vec(sol.grid_d_old[t+1,:], 
