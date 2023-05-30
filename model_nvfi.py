@@ -35,7 +35,7 @@ class model_bufferstock():
         par.eta = 0.8
       
         # Grids
-        par.N = 100                     # Number of points in grids
+        par.N = 50                      # Number of points in grids
         par.n_max = 4.0                 # Maximal net assets
         par.d_max = par.eta * par.n_max # Maximal debt level
         par.n_min = par.d_max * (-1)    # Minimal net assets
@@ -108,6 +108,93 @@ class model_bufferstock():
     ### solve ###
     #############
 
+    def choice_set(self):
+
+        par = self.par
+        sol = self.sol
+        aux = self.aux
+
+        grid_n = aux.grid_n
+        grid_d = aux.grid_d
+        grid_u = aux.grid_u
+
+
+        n_container = np.zeros((par.N,par.N,2,par.N,par.N))
+        d_container = np.zeros((par.N,par.N,2,par.N,par.N))
+
+        for i_u, u_bar in enumerate(grid_u):
+            for i_n, n_bar in enumerate(grid_n):
+                for i_d, d_bar in enumerate(grid_d):
+                    
+                    d_grid = self.grid_d(n_bar,d_bar,u_bar)
+                    
+                    for i_d_, d in enumerate(d_grid):
+                        
+                        c_grid = self.grid_c(n_bar,d)
+
+                        for i_c, c in enumerate(c_grid):
+
+                            n_container[i_n,i_d,i_u,i_c,i_d_] = (1 + par.r_a) * (n_bar - c) - (par.r_d - par.r_a) * d
+                            d_container[i_n,i_d,i_u,i_c,i_d_] = (1 - par.lambdaa) * d
+
+        n_flat = n_container.flatten()
+        d_flat = d_container.flatten()
+        n_max = max(n_flat)
+        n_min = min(n_flat)
+        d_max = max(d_flat)
+        d_min = min(d_flat)
+
+        print('n_min = ',n_min)
+        print('n_max = ',n_max)
+        print('d_min = ',d_min)
+        print('d_max = ',d_max)
+
+        aux.n_post_grid = np.linspace(n_min,n_max,par.N)
+        aux.d_post_grid = np.linspace(d_min,d_max,par.N)
+
+    def solve_vfi(self):
+        ''' Solve model with VFI - slow but safe??? '''
+        
+        par = self.par
+        sol = self.sol
+        aux = self.aux
+
+        grid_n = aux.grid_n
+        grid_d = aux.grid_d
+        grid_u = aux.grid_u
+
+        for t in range(par.T-1,-1,-1):   
+            for i_u, u_bar in enumerate(grid_u):
+                for i_n, n_bar in enumerate(grid_n):
+                    for i_d, d_bar in enumerate(grid_d):
+                        
+                        v = -np.inf
+                        d_grid = self.grid_d(n_bar,d_bar,u_bar)
+                        
+                        for d in d_grid:
+                            
+                            c_grid = self.grid_c(n_bar,d)
+
+                            for c in c_grid:
+
+                                n_plus = (1 + par.r_a) * (n_bar - c) - (par.r_d - par.r_a) * d
+                                d_plus = (1 - par.lambdaa) * d
+
+                                v_plus = 0
+                                
+                                if t < par.T-1:
+                                    v_plus_emp = tools.interp_2d(grid_n, grid_d, sol.v[t+1,:,:,0], n_plus, d_plus)
+                                    v_plus_unemp = tools.interp_2d(grid_n, grid_d, sol.v[t+1,:,:,1], n_plus, d_plus)
+                                    v_plus = (1 - par.u_prob) * v_plus_emp + par.u_prob * v_plus_unemp
+
+                                v_guess = self.utility(c) + par.beta * v_plus
+                                
+                                if v_guess > v:
+                                    v = v_guess
+                                    sol.v[t,i_n,i_d,i_u] = v
+                                    sol.c[t,i_n,i_d,i_u] = c
+                                    sol.d[t,i_n,i_d,i_u] = d
+
     def post_decision(self,t):
         ''' Compute post-decision value function in period t '''
 
@@ -122,15 +209,25 @@ class model_bufferstock():
         for i_u, u_bar in enumerate(grid_u):
             for i_n, n_bar in enumerate(grid_n):
                 for i_d, d_bar in enumerate(grid_d):
+                    
+                    # Choice set for d
+                    d_grid = self.grid_d(n_bar,d_bar,u_bar)
+                    
+                    for d in d_grid:
+       
+                        # Choice set for c
+                        c_grid = self.grid_d(n_bar,d)
 
-                    # Post-decision states
-                    n_bar_plus = (1 + par.r_a) * n_bar - (par.r_d - par.r_a) * d_bar
-                    d_bar_plus = (1 - par.lambdaa) * d_bar
+                        for c in c_grid:
 
-                    # Continuation value
-                    w_unemp = tools.interp_2d(grid_n, grid_d, sol.v[t+1,:,:,1], n_bar_plus, d_bar_plus) 
-                    w_emp = tools.interp_2d(grid_n, grid_d, sol.v[t+1,:,:,0], n_bar_plus, d_bar_plus)    
-                    sol.w[t,i_n,i_d,i_u] = (1 - par.u_prob) * w_emp + par.u_prob * w_unemp
+                            # Post-decision states
+                            n_bar_plus[n_bar,d_bar,u_bar,c,d] = (1 + par.r_a) * (n_bar - c) - (par.r_d - par.r_a) * d
+                            d_bar_plus[n_bar,d_bar,u_bar,c,d] = (1 - par.lambdaa) * d * np.ones(par.N)
+
+                            # Continuation value
+                            w_unemp = tools.interp_2d(grid_n, grid_d, sol.v[t+1,:,:,1], n_bar_plus, d_bar_plus) 
+                            w_emp = tools.interp_2d(grid_n, grid_d, sol.v[t+1,:,:,0], n_bar_plus, d_bar_plus)    
+                            sol.w[t,i_n,i_d,i_u] = (1 - par.u_prob) * w_emp + par.u_prob * w_unemp
 
     def solve_last_period(self):
         ''' Solve problem in last period '''
@@ -157,6 +254,10 @@ class model_bufferstock():
                             sol.c[par.T-1,i_n,i_d,i_u] = n_bar + d_bar # Consume everything
                             sol.d[par.T-1,i_n,i_d,i_u] = d_bar
                             sol.v[par.T-1,i_n,i_d,i_u] = self.utility(n_bar + d_bar)
+
+        sol.c_keep[par.T-1,:,:,:] = sol.c[par.T-1,:,:,:]
+        sol.d_keep[par.T-1,:,:,:] = sol.d[par.T-1,:,:,:]
+        sol.v_keep[par.T-1,:,:,:] = sol.v[par.T-1,:,:,:]
 
         print("T =========== ", par.T-1)
 
@@ -236,7 +337,7 @@ class model_bufferstock():
 
         return grid_c
 
-    def solve_nvfi(self):
+    def solve_nvfi(self,keeper_only=True):
 
         sol = self.sol
         par = self.par
@@ -253,7 +354,7 @@ class model_bufferstock():
             print("T =========== ", t)
 
             # 1. Compute post-decision value
-            self.post_decision(t)
+            self.post_decision(t)      
  
             # 2. Solve keeper's problem
             for i_n, n_bar in enumerate(grid_n):
@@ -262,21 +363,28 @@ class model_bufferstock():
 
                         c_keep, v_keep = self.solve_keeper(t,n_bar,d_bar,u)
                         
-                        sol.c_keep[t, i_d, i_n, u] = c_keep
-                        sol.v_keep[t, i_d, i_n, u] = v_keep
+                        sol.c_keep[t, i_n, i_d, u] = c_keep
+                        sol.v_keep[t, i_n, i_d, u] = v_keep
+
+                        if keeper_only == True:
+                            sol.c[t, i_n, i_d, u] = c_keep
+                            sol.d[t, i_n, i_d, u] = d_bar
+                            sol.v[t, i_n, i_d, u] = v_keep
             
-            # 3. Solve adjuster's problem
-            for i_n, n_bar in enumerate(grid_n):
-                for i_d, d_bar in enumerate(grid_d):
-                    for u in grid_u:
+            if keeper_only == False:
 
-                        if u == 1: 
-                            sol.c[t, i_d, i_n, u] = sol.c_keep[t, i_d, i_n, u]
-                            sol.v[t, i_d, i_n, u] = sol.v_keep[t, i_d, i_n, u]
-                            continue # No credit access => no adjuster problem   
+                # 3. Solve adjuster's problem
+                for i_n, n_bar in enumerate(grid_n):
+                    for i_d, d_bar in enumerate(grid_d):
+                        for u in grid_u:
 
-                        c_adj, d_adj, v_adj = self.solve_adjuster(t,n_bar,d_bar,u)
+                            if u == 1: # No credit access => no adjuster problem
+                                sol.c[t, i_n, i_d, u] = sol.c_keep[t, i_n, i_d, u]
+                                sol.v[t, i_n, i_d, u] = sol.v_keep[t, i_n, i_d, u]
+                                    
+                            else:
+                                c_adj, d_adj, v_adj = self.solve_adjuster(t,n_bar,d_bar,u)
 
-                        sol.c[t, i_d, i_n, u] = c_adj
-                        sol.d[t, i_d, i_n, u] = d_adj
-                        sol.v[t, i_d, i_n, u] = v_adj
+                                sol.c[t, i_n, i_d, u] = c_adj
+                                sol.d[t, i_n, i_d, u] = d_adj
+                                sol.v[t, i_n, i_d, u] = v_adj
