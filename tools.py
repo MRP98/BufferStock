@@ -81,6 +81,8 @@ def _interp_2d(grid1,grid2,value,xi1,xi2,j1,j2):
         for k2 in range(2):
             nom_2 = nom_2_left if k2 == 0 else nom_2_right                    
             nom += nom_1*nom_2*value[j1+k1,j2+k2]
+    if denom == 0:
+        denom = 1e-8
 
     return nom/denom
 
