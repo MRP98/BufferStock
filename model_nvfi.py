@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from scipy import optimize
 import numpy as np
 import tools
+import matplotlib.pyplot as plt
 
 class model_bufferstock():
 
@@ -23,7 +24,7 @@ class model_bufferstock():
         par = self.par
 
         # Preferences
-        par.T = 10                      # Terminal age
+        par.T = 5                       # Terminal age
         par.beta = 0.90                 # Discount factor
         par.rho = 0.5                   # CRRA risk aversion
 
@@ -35,10 +36,10 @@ class model_bufferstock():
         par.eta = 0.8
       
         # Grids
-        par.N = 50                      # Number of points in grids
-        par.n_max = 4.0                 # Maximal net assets
-        par.d_max = par.eta * par.n_max # Maximal debt level
-        par.n_min = par.d_max * (-1)    # Minimal net assets
+        par.N = 25                      # Number of points in grids
+        par.n_max = 4.0                 # Maximal initial net assets (at t=0)
+        par.n_min = 1e-8                # Minimal initial net assets (at t=0)
+        par.d_max = 1                   # Maximal initial debt level (at t=0)
 
         # Income parameters
         par.Gamma = 1.02                # Deterministic drift in income
@@ -60,9 +61,9 @@ class model_bufferstock():
         
         # Solutions
         sol.w = np.zeros((par.T,par.N,par.N,2)) # Continuation value
-        sol.d = np.zeros((par.T,par.N,par.N,2))
-        sol.c = np.zeros((par.T,par.N,par.N,2))
-        sol.v = np.zeros((par.T,par.N,par.N,2))
+        sol.d = np.zeros((par.T,40*40,40*40,2))
+        sol.c = np.zeros((par.T,40*40,40*40,2))
+        sol.v = np.zeros((par.T,40*40,40*40,2))
         sol.d_keep = np.zeros((par.T,par.N,par.N,2))
         sol.c_keep = np.zeros((par.T,par.N,par.N,2))
         sol.v_keep = np.zeros((par.T,par.N,par.N,2))    
@@ -108,49 +109,153 @@ class model_bufferstock():
     ### solve ###
     #############
 
-    def choice_set(self):
+    def state_space(self,approx_points):
+        ''' Compute state space '''
 
         par = self.par
-        sol = self.sol
         aux = self.aux
 
-        grid_n = aux.grid_n
-        grid_d = aux.grid_d
+        # Search grids
+        search_grid_d = np.linspace(0.0,3.5,approx_points) # Narrow interval for faster approximation
+        search_grid_n = np.linspace(-3.5,4.5,approx_points)
+
+        # Initial state space at t = 0
+        grid_n_bar = np.linspace(par.n_min,par.n_max,30)
+        grid_d_bar = np.linspace(1e-8,par.d_max,30)
+        d, n = np.meshgrid(grid_d_bar,grid_n_bar)
         grid_u = aux.grid_u
 
+        # Container for state spaces
+        aux.state_spaces_approx = [(d,n)]
+        aux.state_spaces_true = [(d,n)]
 
-        n_container = np.zeros((par.N,par.N,2,par.N,par.N))
-        d_container = np.zeros((par.N,par.N,2,par.N,par.N))
+        for t in range(4):
 
-        for i_u, u_bar in enumerate(grid_u):
-            for i_n, n_bar in enumerate(grid_n):
-                for i_d, d_bar in enumerate(grid_d):
-                    
-                    d_grid = self.grid_d(n_bar,d_bar,u_bar)
-                    
-                    for i_d_, d in enumerate(d_grid):
+            n_bar_plus_ = []
+            d_bar_plus_ = []
+
+            print("T =========== ", t+1)
+
+            for u in grid_u:
+                for d_bar in grid_d_bar:
+                    for n_bar in grid_n_bar:
                         
-                        c_grid = self.grid_c(n_bar,d)
+                        grid_d = self.grid_d(n_bar, d_bar, u, grid_points=35) # Choice set for d
 
-                        for i_c, c in enumerate(c_grid):
+                        for d in grid_d:
+                            
+                            grid_c = self.grid_c(n_bar, d, grid_points=35) # Choice set for c
 
-                            n_container[i_n,i_d,i_u,i_c,i_d_] = (1 + par.r_a) * (n_bar - c) - (par.r_d - par.r_a) * d
-                            d_container[i_n,i_d,i_u,i_c,i_d_] = (1 - par.lambdaa) * d
+                            for c in grid_c:
 
-        n_flat = n_container.flatten()
-        d_flat = d_container.flatten()
-        n_max = max(n_flat)
-        n_min = min(n_flat)
-        d_max = max(d_flat)
-        d_min = min(d_flat)
+                                d_bar_plus = (1 - par.lambdaa) * d 
+                                n_bar_plus = (1 + par.r_a) * (n_bar - c) - (par.r_d - par.r_a) * d
+                    
+                                d_bar_plus_.append(d_bar_plus)
+                                n_bar_plus_.append(n_bar_plus)
 
-        print('n_min = ',n_min)
-        print('n_max = ',n_max)
-        print('d_min = ',d_min)
-        print('d_max = ',d_max)
+            # True state space
+            d_bar_plus_ = np.array(d_bar_plus_)
+            n_bar_plus_ = np.array(n_bar_plus_)
 
-        aux.n_post_grid = np.linspace(n_min,n_max,par.N)
-        aux.d_post_grid = np.linspace(d_min,d_max,par.N)
+            aux.state_spaces_true.append((d_bar_plus_,n_bar_plus_))
+
+            # Approximated state space
+            gd, gn = self.approximate_ss(search_grid_d,search_grid_n,d_bar_plus_,n_bar_plus_,threshold=0.075)
+
+            aux.state_spaces_approx.append((gd, gn))
+
+            grid_d_bar = gd[1,:]
+            grid_n_bar = gn[:,1]
+
+    def plot_state_space(self,t_plot=None,true_space=False):
+        ''' Plot the state space '''
+            
+        aux = self.aux
+
+        if t_plot != None:
+            
+            if true_space == True:
+                
+                print("Warning: Takes a while to plot. Don't lose patience ... ")
+
+                plt.scatter(aux.state_spaces_true[t_plot][0],
+                            aux.state_spaces_true[t_plot][1],
+                            s=1,label='True state space at $t =$ '+str(t_plot))
+            
+            plt.scatter(aux.state_spaces_approx[t_plot][0],
+                        aux.state_spaces_approx[t_plot][1],
+                        s=2,color='red',label='Approximation')
+            
+        if t_plot == None:
+            
+            for t in range(len(aux.state_spaces_approx)):
+                plt.scatter(aux.state_spaces_approx[t][0],
+                            aux.state_spaces_approx[t][1],
+                            s=2,label='Approximation at $t =$ '+str(t))
+
+        plt.ylabel(r'$\bar{n}$')
+        plt.xlabel(r'$\bar{d}$')
+        plt.legend()  
+
+    def approximate_ss(self,search_gridx,search_gridy,state_gridx,state_gridy,threshold=0.05):
+        ''' Approximate state space in a given period '''
+
+        # Search grid
+        gridX, gridY = np.meshgrid(search_gridx, search_gridy)
+        
+        # Threshold value for distance
+        threshold = threshold
+        
+        # Grid to be approximated (state grid)
+        gridx = state_gridx
+        gridy = state_gridy 
+
+        mask = False * np.empty_like(gridX, dtype=bool)
+
+        for (x,y) in  zip(gridx, gridy):
+            
+            pX = x * np.ones_like(gridX)
+            pY = y * np.ones_like(gridY)
+            
+            distX = (pX - gridX)**2
+            distY = (pY - gridY)**2
+            
+            dist = np.sqrt(distX + distY)
+            
+            condition = (dist < threshold)
+            
+            mask = mask | condition
+
+        # Approximated grids
+        gX = gridX*mask
+        gY = gridY*mask
+
+        return (gX, gY)
+
+    def clean_ss(self):
+        ''' Convert from mesh grid to 1D arrays and convert 0 to 1e-8 '''
+
+        aux = self.aux
+
+        for i in range(len(aux.state_spaces_approx)):
+            
+            # Convert from tuple (immutable) to list (mutable)
+            aux.state_spaces_approx[i] = list(aux.state_spaces_approx[i])
+
+            # Convert to 1D arrays
+            d_bar = aux.state_spaces_approx[i][0].flatten()
+            n_bar = aux.state_spaces_approx[i][1].flatten()
+
+            # Convert 0 to 1e-8 (for interpolation)
+            d_zero_ind = np.where(d_bar == 0)[0]
+            n_zero_ind = np.where(n_bar == 0)[0]
+
+            d_bar[d_zero_ind] = 1e-8
+            n_bar[n_zero_ind] = 1e-8
+
+            aux.state_spaces_approx[i][0] = d_bar
+            aux.state_spaces_approx[i][1] = n_bar
 
     def solve_vfi(self):
         ''' Solve model with VFI - slow but safe??? '''
@@ -159,17 +264,26 @@ class model_bufferstock():
         sol = self.sol
         aux = self.aux
 
-        grid_n = aux.grid_n
-        grid_d = aux.grid_d
         grid_u = aux.grid_u
+        ss = aux.state_spaces_approx
 
-        for t in range(par.T-1,-1,-1):   
-            for i_u, u_bar in enumerate(grid_u):
-                for i_n, n_bar in enumerate(grid_n):
-                    for i_d, d_bar in enumerate(grid_d):
+        ini_n_bar = np.linspace(par.n_min,par.n_max,40)
+        ini_d_bar = np.linspace(1e-8,par.d_max,40)
+        dx, nx = np.meshgrid(ini_d_bar,ini_n_bar)
+        dx = dx.flatten()
+        nx = nx.flatten()
+        ss[0] = (dx,nx)
+
+        for t in range(par.T-1,-1,-1):
+            
+            print('T = ', t)  
+            
+            for u in grid_u:
+                
+                for (i_d,d_bar),(i_n,n_bar) in zip(enumerate(ss[t][0]),enumerate(ss[t][1])):
                         
                         v = -np.inf
-                        d_grid = self.grid_d(n_bar,d_bar,u_bar)
+                        d_grid = self.grid_d(n_bar,d_bar,u)
                         
                         for d in d_grid:
                             
@@ -183,17 +297,17 @@ class model_bufferstock():
                                 v_plus = 0
                                 
                                 if t < par.T-1:
-                                    v_plus_emp = tools.interp_2d(grid_n, grid_d, sol.v[t+1,:,:,0], n_plus, d_plus)
-                                    v_plus_unemp = tools.interp_2d(grid_n, grid_d, sol.v[t+1,:,:,1], n_plus, d_plus)
+                                    v_plus_unemp = tools.interp_2d(ss[t+1][0], ss[t+1][1], sol.v[t+1,:,:,1], n_plus, d_plus)
+                                    v_plus_emp = tools.interp_2d(ss[t+1][0], ss[t+1][1], sol.v[t+1,:,:,0], n_plus, d_plus)
                                     v_plus = (1 - par.u_prob) * v_plus_emp + par.u_prob * v_plus_unemp
 
                                 v_guess = self.utility(c) + par.beta * v_plus
                                 
                                 if v_guess > v:
                                     v = v_guess
-                                    sol.v[t,i_n,i_d,i_u] = v
-                                    sol.c[t,i_n,i_d,i_u] = c
-                                    sol.d[t,i_n,i_d,i_u] = d
+                                    sol.v[t,i_n,i_d,u] = v
+                                    sol.c[t,i_n,i_d,u] = c
+                                    sol.d[t,i_n,i_d,u] = d
 
     def post_decision(self,t):
         ''' Compute post-decision value function in period t '''
@@ -314,26 +428,37 @@ class model_bufferstock():
         
         return (c_adj, d_adj, v_adj)
 
-    def grid_d(self,n_bar,d_bar,u):
+    def grid_d(self,n_bar,d_bar,u,grid_points=None):
         ''' Choice set for debt '''
 
         par = self.par
 
-        x = int(not(u)) 
-        lower = max(-n_bar, 0) 
-        upper = max(d_bar, x * par.eta * n_bar)
-        grid_d = np.linspace(lower, upper, par.N)
+        if grid_points is None:
+            x = int(not(u)) 
+            lower = max(-n_bar, 0) 
+            upper = max(d_bar, x * par.eta * n_bar)
+            grid_d = np.linspace(lower, upper, par.N)
+        else:
+            x = int(not(u)) 
+            lower = max(-n_bar, 0) 
+            upper = max(d_bar, x * par.eta * n_bar)
+            grid_d = np.linspace(lower, upper, grid_points) # Used for state spaces
 
         return grid_d
     
-    def grid_c(self,n_bar,d):
+    def grid_c(self,n_bar,d,grid_points=None):
         ''' Choice set for consumption '''
 
         par = self.par
 
-        lower = 0
-        upper = max(0,n_bar + d)
-        grid_c = np.linspace(lower, upper, par.N)
+        if grid_points is None:
+            lower = 0
+            upper = max(0,n_bar + d)
+            grid_c = np.linspace(lower, upper, par.N)
+        else:
+            lower = 0
+            upper = max(0,n_bar + d)
+            grid_c = np.linspace(lower, upper, grid_points) # Used for state spaces
 
         return grid_c
 
