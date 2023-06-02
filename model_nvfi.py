@@ -15,7 +15,7 @@ class model_bufferstock():
         self.aux = SimpleNamespace() # Auxillary variables
     
     #############
-    ### setup ###
+    ### Setup ###
     #############
 
     def setup(self):
@@ -36,15 +36,15 @@ class model_bufferstock():
         par.eta = 0.8
       
         # Grids
-        par.N = 25                             # Number of points in grids
+        par.N = 50                             # Number of points in grids
         par.n_max = 4.0                        # Maximal initial net assets (at t=0)
         par.n_min = par.eta * par.n_max * (-1) # Minimal initial net assets (at t=0)
         par.d_max = par.eta * par.n_max        # Maximal initial debt level (at t=0)
 
         # Income parameters
         par.Gamma = 1.02                # Deterministic drift in income
-        par.u_prob = 0.07               # Probability of unemployment
-        par.low_val = 0.03              # Negative shock if unemployed (Called mu in paper) 
+        par.u_prob = 0.10               # Probability of unemployment
+        par.low_val = -0.03             # Negative shock if unemployed (Called mu in paper) 
         par.sigma_xi = 0.02             # Transitory shock
         par.sigma_psi = 0.00005         # Permanent shock
 
@@ -71,7 +71,7 @@ class model_bufferstock():
         # Grids
         aux.grid_n = np.linspace(par.n_min,par.n_max,par.N)
         aux.grid_d = np.linspace(1e-8,par.d_max,par.N)
-        aux.grid_u = np.array([1,0])
+        aux.grid_u = np.array([0,1])
 
     def create_grids(self):
         
@@ -104,10 +104,278 @@ class model_bufferstock():
     def utility(self,c):
 
         return (c**(1-self.par.rho)/(1-self.par.rho))
+        ''' Choice set for debt '''
 
+        par = self.par
+
+        if grid_points is None:
+            x = int(not(u)) 
+            lower = max(-n_bar, 0) 
+            upper = max(d_bar, x * par.eta * n_bar)
+            grid_d = np.linspace(lower, upper, par.N)
+        else:
+            x = int(not(u)) 
+            lower = max(-n_bar, 0) 
+            upper = max(d_bar, x * par.eta * n_bar)
+            grid_d = np.linspace(lower, upper, grid_points) # Used for state spaces
+
+        return grid_d
+    
+    def grid_c(self,n_bar,d,grid_points=None):
+        ''' Choice set for consumption '''
+
+        par = self.par
+
+        if grid_points is None:
+            lower = 0
+            upper = max(0,n_bar + d)
+            grid_c = np.linspace(lower, upper, par.N)
+        else:
+            lower = 0
+            upper = max(0,n_bar + d)
+            grid_c = np.linspace(lower, upper, grid_points) # Used for state spaces
+
+        return grid_c
+    
+    def grid_d(self,n_bar,d_bar,u,grid_points=None):
+        ''' Choice set for debt '''
+
+        par = self.par
+
+        if grid_points is None:
+            x = int(not(u)) 
+            lower = max(-n_bar, 0) 
+            upper = max(d_bar, x * par.eta * n_bar)
+            grid_d = np.linspace(lower, upper, par.N)
+        else:
+            x = int(not(u)) 
+            lower = max(-n_bar, 0) 
+            upper = max(d_bar, x * par.eta * n_bar)
+            grid_d = np.linspace(lower, upper, grid_points) # Used for state spaces
+
+        return grid_d    
+    
     #############
-    ### solve ###
+    ### Solve ###
     #############
+
+    def post_decision(self,t):
+        ''' Compute post-decision value function in period t '''
+
+        par = self.par
+        sol = self.sol
+        aux = self.aux
+
+        grid_n = aux.grid_n
+        grid_d = aux.grid_d
+        grid_u = aux.grid_u
+
+        for u in grid_u:
+            for i_d, d in enumerate(grid_d):
+                for i_n, n in enumerate(grid_n):
+                    
+                    n_bar_plus = (1 + par.r_a) * n - (par.r_d - par.r_a) * d
+                    d_bar_plus = (1 - par.lambdaa) * d
+                    w_unemp = 0
+                    w_emp = 0
+
+                    for s in range(len(par.xi_vec)):
+                        
+                        # Shocks
+                        weight = par.w[s]
+                        xi = 0
+
+                        # Continuation value (unemployed and employed)
+                        w_unemp += weight * tools.interp_2d(grid_d, grid_n, sol.v[t+1,:,:,1], d_bar_plus, n_bar_plus+xi) 
+                        w_emp += weight * tools.interp_2d(grid_d, grid_n, sol.v[t+1,:,:,0], d_bar_plus, n_bar_plus+xi)    
+                    
+                    sol.w[t,i_d,i_n,u] = (1 - par.u_prob) * w_emp + par.u_prob * w_unemp
+
+    def solve_last_period(self):
+        ''' Solve problem in last period '''
+
+        par = self.par
+        sol = self.sol
+        aux = self.aux
+
+        grid_n = aux.grid_n
+        grid_d = aux.grid_d
+        grid_u = aux.grid_u
+
+        # Assuming no new debt in last period
+        for u in grid_u:
+            for i_d, d_bar in enumerate(grid_d):
+                for i_n, n_bar in enumerate(grid_n):
+                        
+                        if n_bar + d_bar <= 0: # Negative net assets => no consumption
+                            sol.c[par.T-1,i_d,i_n,u] = 0
+                            sol.d[par.T-1,i_d,i_n,u] = d_bar
+                            sol.v[par.T-1,i_d,i_n,u] = 0
+                            
+                        else: # Consume everything
+                            sol.c[par.T-1,i_d,i_n,u] = n_bar + d_bar
+                            sol.d[par.T-1,i_d,i_n,u] = d_bar
+                            sol.v[par.T-1,i_d,i_n,u] = self.utility(n_bar + d_bar)
+
+        sol.c_keep[par.T-1,:,:,:] = sol.c[par.T-1,:,:,:]
+        sol.d_keep[par.T-1,:,:,:] = sol.d[par.T-1,:,:,:]
+        sol.v_keep[par.T-1,:,:,:] = sol.v[par.T-1,:,:,:]
+
+        print("T =========== ", par.T-1)
+
+    def solve_keeper(self,t,n_bar,d_bar,u):
+        ''' Solve keepers's problem in period t given states '''
+
+        sol = self.sol
+        par = self.par
+        aux = self.aux
+
+        grid_n = aux.grid_n
+        grid_d = aux.grid_d
+        
+        d = d_bar # Assuming fixed debt choice
+        c = self.grid_c(n_bar,d)
+
+        n_bar_plus = (1 + par.r_a) * (n_bar - c) - (par.r_d - par.r_a) * d
+        d_bar_plus = (1 - par.lambdaa) * d * np.ones(par.N)
+   
+        # Interpolation of post-decision value function
+        v_plus = tools.interp_2d_vec(grid_d, grid_n, sol.w[t,:,:,u], d_bar_plus, n_bar_plus)
+
+        # Solve Bellman equation
+        v = self.utility(c) + par.beta * v_plus
+        index = np.argmax(v)
+        c_keep = c[index]
+        v_keep = v[index]
+
+        return (c_keep, v_keep) 
+    
+    def solve_adjuster(self,t,n_bar,d_bar,u,i_n):
+        ''' Solve adjuster's problem in period t given states '''
+
+        sol = self.sol
+        aux = self.aux
+
+        grid_d = aux.grid_d
+
+        d = self.grid_d(n_bar,d_bar,u)
+
+        # Interpolation of keeper's value function
+        v = tools.interp_linear_1d(grid_d, sol.v_keep[t,:,i_n,u], d)
+        
+        index = np.argmax(v)
+        d_adj = d[index]
+        v_adj = v[index]
+
+        # Interpolation of keeper's consumption function
+        c_adj = tools.interp_linear_1d_scalar(grid_d, sol.c_keep[t,:,i_n,u], d_adj)         
+        
+        return (c_adj, d_adj, v_adj)
+
+    def solve_nvfi(self,keeper_only=False):
+        ''' Solve model with nested value function iterations '''
+
+        sol = self.sol
+        par = self.par
+        aux = self.aux
+
+        grid_n = aux.grid_n
+        grid_d = aux.grid_d
+        grid_u = aux.grid_u
+
+        self.solve_last_period() # Last period
+
+        for t in range(par.T-2,-1,-1):            
+            
+            print("T =========== ", t)
+
+            # 1. Compute post-decision value
+            self.post_decision(t)      
+ 
+            # 2. Solve keeper's problem
+            for u in grid_u:
+                for i_d, d_bar in enumerate(grid_d):
+                    for i_n, n_bar in enumerate(grid_n):
+
+                        c_keep, v_keep = self.solve_keeper(t,n_bar,d_bar,u)
+                        
+                        sol.c_keep[t, i_d, i_n, u] = c_keep
+                        sol.d_keep[t, i_d, i_n, u] = d_bar
+                        sol.v_keep[t, i_d, i_n, u] = v_keep
+
+                        if keeper_only == True:
+                            sol.c[t, i_d, i_n, u] = c_keep
+                            sol.d[t, i_d, i_n, u] = d_bar
+                            sol.v[t, i_d, i_n, u] = v_keep
+            
+            if keeper_only == False:
+
+                # 3. Solve adjuster's problem
+                for u in grid_u:
+                    for i_d, d_bar in enumerate(grid_d):
+                        for i_n, n_bar in enumerate(grid_n):
+
+                            if u == 1: # No credit access => no adjuster problem
+                                sol.c[t, i_d, i_n, u] = sol.c_keep[t, i_d, i_n, u]
+                                sol.d[t, i_d, i_n, u] = sol.d_keep[t, i_d, i_n, u]
+                                sol.v[t, i_d, i_n, u] = sol.v_keep[t, i_d, i_n, u]
+                                    
+                            else:
+                                c_adj, d_adj, v_adj = self.solve_adjuster(t,n_bar,d_bar,u,i_n)
+
+                                sol.c[t, i_d, i_n, u] = c_adj
+                                sol.d[t, i_d, i_n, u] = d_adj
+                                sol.v[t, i_d, i_n, u] = v_adj
+
+    def solve_vfi(self):
+        ''' Solve model with value function iterations '''
+        
+        par = self.par
+        sol = self.sol
+        aux = self.aux
+
+        grid_n = aux.grid_n
+        grid_d = aux.grid_d
+        grid_u = aux.grid_u
+
+        for t in range(par.T-1,-1,-1):   
+            
+            print('T = ',t)
+            
+            for u in grid_u:
+                for i_d, d_bar in enumerate(grid_d):
+                    for i_n, n_bar in enumerate(grid_n):
+                        
+                        v = -np.inf
+                        d_grid = self.grid_d(n_bar,d_bar,u)
+                        
+                        for d in d_grid:
+                            
+                            c_grid = self.grid_c(n_bar,d)
+
+                            for c in c_grid:
+
+                                n_plus = (1 + par.r_a) * (n_bar - c) - (par.r_d - par.r_a) * d
+                                d_plus = (1 - par.lambdaa) * d
+
+                                v_plus = 0
+                                
+                                if t < par.T-1:
+                                    v_plus_unemp = tools.interp_2d(grid_d, grid_n, sol.v[t+1,:,:,1], d_plus, n_plus)
+                                    v_plus_emp = tools.interp_2d(grid_d, grid_n, sol.v[t+1,:,:,0], d_plus, n_plus)
+                                    v_plus = (1 - par.u_prob) * v_plus_emp + par.u_prob * v_plus_unemp
+
+                                v_guess = self.utility(c) + par.beta * v_plus
+                                
+                                if v_guess > v:
+                                    v = v_guess
+                                    sol.v[t,i_d,i_n,u] = v
+                                    sol.c[t,i_d,i_n,u] = c
+                                    sol.d[t,i_d,i_n,u] = d
+            
+    #################
+    ### Graveyard ###
+    #################
 
     def state_space(self,approx_points):
         ''' Compute state space '''
@@ -256,254 +524,3 @@ class model_bufferstock():
 
             aux.state_spaces_approx[i][0] = d_bar
             aux.state_spaces_approx[i][1] = n_bar
-
-    def solve_vfi(self):
-        ''' Solve model with VFI - slow but safe??? '''
-        
-        par = self.par
-        sol = self.sol
-        aux = self.aux
-
-        grid_u = aux.grid_u
-        grid_d = aux.grid_d
-        grid_n = aux.grid_n
-
-        for t in range(par.T-1,-1,-1):
-            
-            print('T = ', t)  
-            
-            for u in grid_u:    
-                for i_d, d_bar in enumerate(grid_d):
-                    for i_n, n_bar in enumerate(grid_n):
-                        
-                        v = -np.inf
-                        d_grid = self.grid_d(n_bar,d_bar,u)
-                        
-                        for d in d_grid:
-                            
-                            c_grid = self.grid_c(n_bar,d)
-
-                            for c in c_grid:
-
-                                n_plus = (1 + par.r_a) * (n_bar - c) - (par.r_d - par.r_a) * d
-                                d_plus = (1 - par.lambdaa) * d
-
-                                v_plus = 0
-                                
-                                if t < par.T-1:
-                                    v_plus_unemp = tools.interp_2d(grid_d, grid_n, sol.v[t+1,:,:,1], n_plus, d_plus)
-                                    v_plus_emp = tools.interp_2d(grid_d, grid_n, sol.v[t+1,:,:,0], n_plus, d_plus)
-                                    v_plus = (1 - par.u_prob) * v_plus_emp + par.u_prob * v_plus_unemp
-
-                                v_guess = self.utility(c) + par.beta * v_plus
-                                
-                                if v_guess > v:
-                                    v = v_guess
-                                    sol.v[t,i_d,i_n,u] = v
-                                    sol.c[t,i_d,i_n,u] = c
-                                    sol.d[t,i_d,i_n,u] = d
-
-    def post_decision(self,t):
-        ''' Compute post-decision value function in period t '''
-
-        par = self.par
-        sol = self.sol
-        aux = self.aux
-
-        grid_n = aux.grid_n
-        grid_d = aux.grid_d
-        grid_u = aux.grid_u
-
-        for i_u, u_bar in enumerate(grid_u):
-            for i_n, n_bar in enumerate(grid_n):
-                for i_d, d_bar in enumerate(grid_d):
-                    
-                    # Choice set for d
-                    d_grid = self.grid_d(n_bar,d_bar,u_bar)
-                    
-                    for d in d_grid:
-       
-                        # Choice set for c
-                        c_grid = self.grid_d(n_bar,d)
-
-                        for c in c_grid:
-
-                            # Post-decision states
-                            n_bar_plus[n_bar,d_bar,u_bar,c,d] = (1 + par.r_a) * (n_bar - c) - (par.r_d - par.r_a) * d
-                            d_bar_plus[n_bar,d_bar,u_bar,c,d] = (1 - par.lambdaa) * d * np.ones(par.N)
-
-                            # Continuation value
-                            w_unemp = tools.interp_2d(grid_n, grid_d, sol.v[t+1,:,:,1], n_bar_plus, d_bar_plus) 
-                            w_emp = tools.interp_2d(grid_n, grid_d, sol.v[t+1,:,:,0], n_bar_plus, d_bar_plus)    
-                            sol.w[t,i_n,i_d,i_u] = (1 - par.u_prob) * w_emp + par.u_prob * w_unemp
-
-    def solve_last_period(self):
-        ''' Solve problem in last period '''
-
-        par = self.par
-        sol = self.sol
-        aux = self.aux
-
-        grid_n = aux.grid_n
-        grid_d = aux.grid_d
-        grid_u = aux.grid_u
-
-        # Assume no new debt in last period
-        for i_u, u_bar in enumerate(grid_u):
-            for i_n, n_bar in enumerate(grid_n):
-                for i_d, d_bar in enumerate(grid_d):
-                        
-                        if n_bar + d_bar <= 0: # Negative net assets => no consumption
-                            sol.c[par.T-1,i_n,i_d,i_u] = 0
-                            sol.d[par.T-1,i_n,i_d,i_u] = d_bar
-                            sol.v[par.T-1,i_n,i_d,i_u] = 0
-                            
-                        else:
-                            sol.c[par.T-1,i_n,i_d,i_u] = n_bar + d_bar # Consume everything
-                            sol.d[par.T-1,i_n,i_d,i_u] = d_bar
-                            sol.v[par.T-1,i_n,i_d,i_u] = self.utility(n_bar + d_bar)
-
-        sol.c_keep[par.T-1,:,:,:] = sol.c[par.T-1,:,:,:]
-        sol.d_keep[par.T-1,:,:,:] = sol.d[par.T-1,:,:,:]
-        sol.v_keep[par.T-1,:,:,:] = sol.v[par.T-1,:,:,:]
-
-        print("T =========== ", par.T-1)
-
-    def solve_keeper(self,t,n_bar,d_bar,u):
-        ''' Solve keepers's problem in period t given states '''
-
-        sol = self.sol
-        par = self.par
-        aux = self.aux
-
-        grid_n = aux.grid_n
-        grid_d = aux.grid_d
-        
-        c = self.grid_c(n_bar,d_bar)
-
-        # Post-decision states
-        n_bar_plus = (1 + par.r_a) * (n_bar - c) - (par.r_d - par.r_a) * d_bar
-        d_bar_plus = (1 - par.lambdaa) * d_bar * np.ones(par.N)
-   
-        # Interpolation of post-decision value function
-        v_plus = tools.interp_2d_vec(grid_n, grid_d, sol.w[t,:,:,u], n_bar_plus, d_bar_plus)
-
-        # Solve Bellman equation
-        v = self.utility(c) + par.beta * v_plus
-        index = np.argmax(v)
-        c_keep = c[index]
-        v_keep = v[index]
-
-        return (c_keep, v_keep) 
-    
-    def solve_adjuster(self,t,n_bar,d_bar,u):
-        ''' Solve adjuster's problem in period t given states '''
-
-        sol = self.sol
-        par = self.par
-        aux = self.aux
-
-        grid_n = aux.grid_n
-        grid_d = aux.grid_d
-
-        d = self.grid_d(n_bar,d_bar,u)
-        n_bar_ = n_bar + d
-        d_bar_ = d
-
-        # Interpolation of keeper value function
-        v = tools.interp_2d_vec(grid_n, grid_d, sol.v_keep[t,:,:,u], n_bar_, n_bar_)
-        
-        index = np.argmax(v)
-        n_bar_adj = n_bar_[index]
-        d_adj = d_bar_[index]
-        v_adj = v[index]
-        
-        c_adj = tools.interp_2d(grid_n, grid_d, sol.c[t,:,:,u], n_bar_adj, d_adj)         
-        
-        return (c_adj, d_adj, v_adj)
-
-    def grid_d(self,n_bar,d_bar,u,grid_points=None):
-        ''' Choice set for debt '''
-
-        par = self.par
-
-        if grid_points is None:
-            x = int(not(u)) 
-            lower = max(-n_bar, 0) 
-            upper = max(d_bar, x * par.eta * n_bar)
-            grid_d = np.linspace(lower, upper, par.N)
-        else:
-            x = int(not(u)) 
-            lower = max(-n_bar, 0) 
-            upper = max(d_bar, x * par.eta * n_bar)
-            grid_d = np.linspace(lower, upper, grid_points) # Used for state spaces
-
-        return grid_d
-    
-    def grid_c(self,n_bar,d,grid_points=None):
-        ''' Choice set for consumption '''
-
-        par = self.par
-
-        if grid_points is None:
-            lower = 0
-            upper = max(0,n_bar + d)
-            grid_c = np.linspace(lower, upper, par.N)
-        else:
-            lower = 0
-            upper = max(0,n_bar + d)
-            grid_c = np.linspace(lower, upper, grid_points) # Used for state spaces
-
-        return grid_c
-
-    def solve_nvfi(self,keeper_only=True):
-
-        sol = self.sol
-        par = self.par
-        aux = self.aux
-
-        grid_n = aux.grid_n
-        grid_d = aux.grid_d
-        grid_u = aux.grid_u
-
-        self.solve_last_period() # Last period
-
-        for t in range(par.T-2,-1,-1):            
-            
-            print("T =========== ", t)
-
-            # 1. Compute post-decision value
-            self.post_decision(t)      
- 
-            # 2. Solve keeper's problem
-            for i_n, n_bar in enumerate(grid_n):
-                for i_d, d_bar in enumerate(grid_d):
-                    for u in grid_u:
-
-                        c_keep, v_keep = self.solve_keeper(t,n_bar,d_bar,u)
-                        
-                        sol.c_keep[t, i_n, i_d, u] = c_keep
-                        sol.v_keep[t, i_n, i_d, u] = v_keep
-
-                        if keeper_only == True:
-                            sol.c[t, i_n, i_d, u] = c_keep
-                            sol.d[t, i_n, i_d, u] = d_bar
-                            sol.v[t, i_n, i_d, u] = v_keep
-            
-            if keeper_only == False:
-
-                # 3. Solve adjuster's problem
-                for i_n, n_bar in enumerate(grid_n):
-                    for i_d, d_bar in enumerate(grid_d):
-                        for u in grid_u:
-
-                            if u == 1: # No credit access => no adjuster problem
-                                sol.c[t, i_n, i_d, u] = sol.c_keep[t, i_n, i_d, u]
-                                sol.v[t, i_n, i_d, u] = sol.v_keep[t, i_n, i_d, u]
-                                    
-                            else:
-                                c_adj, d_adj, v_adj = self.solve_adjuster(t,n_bar,d_bar,u)
-
-                                sol.c[t, i_n, i_d, u] = c_adj
-                                sol.d[t, i_n, i_d, u] = d_adj
-                                sol.v[t, i_n, i_d, u] = v_adj
