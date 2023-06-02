@@ -36,10 +36,10 @@ class model_bufferstock():
         par.eta = 0.8
       
         # Grids
-        par.N = 25                      # Number of points in grids
-        par.n_max = 4.0                 # Maximal initial net assets (at t=0)
-        par.n_min = 1e-8                # Minimal initial net assets (at t=0)
-        par.d_max = 1                   # Maximal initial debt level (at t=0)
+        par.N = 25                             # Number of points in grids
+        par.n_max = 4.0                        # Maximal initial net assets (at t=0)
+        par.n_min = par.eta * par.n_max * (-1) # Minimal initial net assets (at t=0)
+        par.d_max = par.eta * par.n_max        # Maximal initial debt level (at t=0)
 
         # Income parameters
         par.Gamma = 1.02                # Deterministic drift in income
@@ -61,9 +61,9 @@ class model_bufferstock():
         
         # Solutions
         sol.w = np.zeros((par.T,par.N,par.N,2)) # Continuation value
-        sol.d = np.zeros((par.T,40*40,40*40,2))
-        sol.c = np.zeros((par.T,40*40,40*40,2))
-        sol.v = np.zeros((par.T,40*40,40*40,2))
+        sol.d = np.zeros((par.T,par.N,par.N,2))
+        sol.c = np.zeros((par.T,par.N,par.N,2))
+        sol.v = np.zeros((par.T,par.N,par.N,2))
         sol.d_keep = np.zeros((par.T,par.N,par.N,2))
         sol.c_keep = np.zeros((par.T,par.N,par.N,2))
         sol.v_keep = np.zeros((par.T,par.N,par.N,2))    
@@ -129,7 +129,7 @@ class model_bufferstock():
         aux.state_spaces_approx = [(d,n)]
         aux.state_spaces_true = [(d,n)]
 
-        for t in range(4):
+        for t in range(1):
 
             n_bar_plus_ = []
             d_bar_plus_ = []
@@ -265,22 +265,16 @@ class model_bufferstock():
         aux = self.aux
 
         grid_u = aux.grid_u
-        ss = aux.state_spaces_approx
-
-        ini_n_bar = np.linspace(par.n_min,par.n_max,40)
-        ini_d_bar = np.linspace(1e-8,par.d_max,40)
-        dx, nx = np.meshgrid(ini_d_bar,ini_n_bar)
-        dx = dx.flatten()
-        nx = nx.flatten()
-        ss[0] = (dx,nx)
+        grid_d = aux.grid_d
+        grid_n = aux.grid_n
 
         for t in range(par.T-1,-1,-1):
             
             print('T = ', t)  
             
-            for u in grid_u:
-                
-                for (i_d,d_bar),(i_n,n_bar) in zip(enumerate(ss[t][0]),enumerate(ss[t][1])):
+            for u in grid_u:    
+                for i_d, d_bar in enumerate(grid_d):
+                    for i_n, n_bar in enumerate(grid_n):
                         
                         v = -np.inf
                         d_grid = self.grid_d(n_bar,d_bar,u)
@@ -297,17 +291,17 @@ class model_bufferstock():
                                 v_plus = 0
                                 
                                 if t < par.T-1:
-                                    v_plus_unemp = tools.interp_2d(ss[t+1][0], ss[t+1][1], sol.v[t+1,:,:,1], n_plus, d_plus)
-                                    v_plus_emp = tools.interp_2d(ss[t+1][0], ss[t+1][1], sol.v[t+1,:,:,0], n_plus, d_plus)
+                                    v_plus_unemp = tools.interp_2d(grid_d, grid_n, sol.v[t+1,:,:,1], n_plus, d_plus)
+                                    v_plus_emp = tools.interp_2d(grid_d, grid_n, sol.v[t+1,:,:,0], n_plus, d_plus)
                                     v_plus = (1 - par.u_prob) * v_plus_emp + par.u_prob * v_plus_unemp
 
                                 v_guess = self.utility(c) + par.beta * v_plus
                                 
                                 if v_guess > v:
                                     v = v_guess
-                                    sol.v[t,i_n,i_d,u] = v
-                                    sol.c[t,i_n,i_d,u] = c
-                                    sol.d[t,i_n,i_d,u] = d
+                                    sol.v[t,i_d,i_n,u] = v
+                                    sol.c[t,i_d,i_n,u] = c
+                                    sol.d[t,i_d,i_n,u] = d
 
     def post_decision(self,t):
         ''' Compute post-decision value function in period t '''
