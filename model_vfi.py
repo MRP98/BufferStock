@@ -38,10 +38,11 @@ class model_bufferstock():
 
         # Income parameters
         par.Gamma = 1.02        # Deterministic drift in income
-        par.u_prob = 0.05       # Probability of unemployment
-        par.low_val = 0.03      # Negative shock if unemployed (Called mu in paper) 
-        par.sigma_xi = 0.02     # Transitory shock
-        par.sigma_psi = 0.00005 # Permanent shock
+        par.u_prob = 0.07       # Probability of unemployment
+        par.credit_con = 0.10
+        par.low_val = 0.3               # Negative shock if unemployed (Called mu in paper) 
+        par.sigma_xi = 0.01*(4/11)      # Transitory shock
+        par.sigma_psi = 0.01*4          # Permanent shock
 
         ## Shock grid settings
         par.Neps = 8            # Number of quadrature points for eps
@@ -129,7 +130,7 @@ class model_bufferstock():
         m_ = (1 + par.r_w)*w_old - installment - interest + par.Gamma
         m = np.clip(m_, a_min=0, a_max=None) # Kan vi bare ignorere negative værdier?
         
-        w = m + d_next - remaining_debt
+        w = (m + d_next - remaining_debt)/par.Gamma
         
         c = w * grid_c 
         w_c = w - c
@@ -143,7 +144,7 @@ class model_bufferstock():
                 weight = par.w[s]   # Weight of shock = probability of shock
                 xi = par.xi_vec[s]  # Size of shock
                 psi = par.psi_vec[s]
-                m_next = (1+par.r_w)*w_c - d_next*(par.r_d + par.lambdaa) + par.Gamma*xi*psi
+                m_next = (1+par.r_w)*w_c - d_next*(par.r_d + par.lambdaa)/(par.Gamma*xi) + par.Gamma*xi*psi/(par.Gamma*xi)
 
                 # Expected value next if unemployed
                 V_next_unemp += weight*tools.interp_2d_vec(sol.grid_d_old[t+1,:], 
@@ -157,7 +158,8 @@ class model_bufferstock():
                                                          d_next, m_next)
                    
             # Final expected value next as weighted average
-            V_next = par.u_prob * V_next_unemp + (1-par.u_prob) * V_next_emp
+            V_next = par.credit_con * V_next_unemp + (1-par.credit_con) * V_next_emp
+
 
         # Maximize Bellman equation
         V_guess = c**(1-par.rho)/(1-par.rho) + par.beta * V_next
