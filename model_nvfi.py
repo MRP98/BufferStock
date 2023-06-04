@@ -24,29 +24,30 @@ class model_bufferstock():
         par = self.par
 
         # Preferences
-        par.T = 5                       # Terminal age
+        par.T = 10                      # Terminal age
         par.beta = 0.90                 # Discount factor
         par.rho = 0.5                   # CRRA risk aversion
 
         # Debt
         par.r_a = 0.02                  # Return on assets
-        par.r_d = 0.05                  # Interest rate
-        par.lambdaa = 0.10              # Installment
-        par.varphi = 0.74               # Maximal debt
-        par.eta = 0.8
+        par.r_d = 0.10                  # Interest rate
+        par.lambdaa = 0.03              # Installment
+        par.varphi = 0.74               # Credit constraint - income
+        par.eta = 0.8                   # Credit constraint - net assets
       
         # Grids
-        par.N = 50                             # Number of points in grids
-        par.n_max = 4.0                        # Maximal initial net assets (at t=0)
-        par.n_min = par.eta * par.n_max * (-1) # Minimal initial net assets (at t=0)
-        par.d_max = par.eta * par.n_max        # Maximal initial debt level (at t=0)
+        par.N = 40                                          # Number of points in grids
+        par.n_max = 4.0                                     # Maximal initial net assets
+        par.n_min = par.eta * par.n_max * (-1) - par.varphi # Minimal initial net assets
+        par.d_max = par.eta * par.n_max + par.varphi        # Maximal initial debt level
 
         # Income parameters
         par.Gamma = 1.02                # Deterministic drift in income
-        par.u_prob = 0.10               # Probability of unemployment
-        par.low_val = -0.03             # Negative shock if unemployed (Called mu in paper) 
-        par.sigma_xi = 0.02             # Transitory shock
-        par.sigma_psi = 0.00005         # Permanent shock
+        par.u_prob = 0.07               # Probability of being unemployment
+        par.credit_con = 0.10           # Probaility of being credit constrained
+        par.low_val = 0.3               # Negative shock if unemployed
+        par.sigma_xi = 0.01/(4/11)      # Transitory shock
+        par.sigma_psi = 0.01*4          # Permanent shock
 
         ## Shock grid settings
         par.Neps = 8                    # Number of quadrature points for eps
@@ -144,13 +145,13 @@ class model_bufferstock():
 
         if grid_points is None:
             x = int(not(u)) 
-            lower = max(-n_bar, 0) 
-            upper = max(d_bar, x * par.eta * n_bar)
+            lower = 0 
+            upper = max(d_bar, x * (par.eta * n_bar + par.varphi))
             grid_d = np.linspace(lower, upper, par.N)
         else:
             x = int(not(u)) 
-            lower = max(-n_bar, 0) 
-            upper = max(d_bar, x * par.eta * n_bar)
+            lower = 0
+            upper = max(d_bar, x * (par.eta * n_bar + par.varphi))
             grid_d = np.linspace(lower, upper, grid_points) # Used for state spaces
 
         return grid_d    
@@ -174,8 +175,6 @@ class model_bufferstock():
             for i_d, d in enumerate(grid_d):
                 for i_n, n in enumerate(grid_n):
                     
-                    n_bar_plus = (1 + par.r_a) * n - (par.r_d - par.r_a) * d
-                    d_bar_plus = (1 - par.lambdaa) * d
                     w_unemp = 0
                     w_emp = 0
 
@@ -183,13 +182,17 @@ class model_bufferstock():
                         
                         # Shocks
                         weight = par.w[s]
-                        xi = 0
+                        xi = par.xi_vec[s]
+                        psi = par.psi_vec[s]
+
+                        n_bar_plus = ((1 + par.r_a) * n - (par.r_d - par.r_a) * d)/(par.Gamma*psi)
+                        d_bar_plus = ((1 - par.lambdaa) * d)/(par.Gamma*psi)
 
                         # Continuation value (unemployed and employed)
                         w_unemp += weight * tools.interp_2d(grid_d, grid_n, sol.v[t+1,:,:,1], d_bar_plus, n_bar_plus+xi) 
                         w_emp += weight * tools.interp_2d(grid_d, grid_n, sol.v[t+1,:,:,0], d_bar_plus, n_bar_plus+xi)    
                     
-                    sol.w[t,i_d,i_n,u] = (1 - par.u_prob) * w_emp + par.u_prob * w_unemp
+                    sol.w[t,i_d,i_n,u] = (1 - par.credit_con) * w_emp + par.credit_con * w_unemp
 
     def solve_last_period(self):
         ''' Solve problem in last period '''
@@ -235,12 +238,10 @@ class model_bufferstock():
         
         d = d_bar # Assuming fixed debt choice
         c = self.grid_c(n_bar,d)
-
-        n_bar_plus = (1 + par.r_a) * (n_bar - c) - (par.r_d - par.r_a) * d
-        d_bar_plus = (1 - par.lambdaa) * d * np.ones(par.N)
+        n = n_bar - c
    
         # Interpolation of post-decision value function
-        v_plus = tools.interp_2d_vec(grid_d, grid_n, sol.w[t,:,:,u], d_bar_plus, n_bar_plus)
+        v_plus = tools.interp_2d_vec(grid_d, grid_n, sol.w[t,:,:,u], d * np.ones(par.N), n)
 
         # Solve Bellman equation
         v = self.utility(c) + par.beta * v_plus
@@ -355,15 +356,27 @@ class model_bufferstock():
 
                             for c in c_grid:
 
-                                n_plus = (1 + par.r_a) * (n_bar - c) - (par.r_d - par.r_a) * d
-                                d_plus = (1 - par.lambdaa) * d
-
+                                w_unemp = 0
+                                w_emp = 0
                                 v_plus = 0
                                 
                                 if t < par.T-1:
-                                    v_plus_unemp = tools.interp_2d(grid_d, grid_n, sol.v[t+1,:,:,1], d_plus, n_plus)
-                                    v_plus_emp = tools.interp_2d(grid_d, grid_n, sol.v[t+1,:,:,0], d_plus, n_plus)
-                                    v_plus = (1 - par.u_prob) * v_plus_emp + par.u_prob * v_plus_unemp
+
+                                    for s in range(len(par.xi_vec)):
+
+                                        # Shocks
+                                        weight = par.w[s]
+                                        xi = par.xi_vec[s]
+                                        psi = par.psi_vec[s]
+
+                                        n_bar_plus = ((1 + par.r_a) * (n_bar - c) - (par.r_d - par.r_a) * d)/(par.Gamma*psi)
+                                        d_bar_plus = ((1 - par.lambdaa) * d)/(par.Gamma*psi)
+
+                                        # Continuation value (unemployed and employed)
+                                        w_unemp += weight * tools.interp_2d(grid_d, grid_n, sol.v[t+1,:,:,1], d_bar_plus, n_bar_plus+xi) 
+                                        w_emp += weight * tools.interp_2d(grid_d, grid_n, sol.v[t+1,:,:,0], d_bar_plus, n_bar_plus+xi)
+                                    
+                                    v_plus = (1-par.credit_con) * w_unemp + par.credit_con * w_emp
 
                                 v_guess = self.utility(c) + par.beta * v_plus
                                 
