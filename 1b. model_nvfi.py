@@ -26,11 +26,11 @@ class model_bufferstock():
         # Preferences
         par.T = 10                      # Terminal age
         par.beta = 0.90                 # Discount factor
-        par.rho = 0.5                   # CRRA risk aversion
+        par.rho = 3.0                   # CRRA risk aversion
 
         # Debt
-        par.r_a = 0.02                  # Return on assets
-        par.r_d = 0.10                  # Interest rate
+        par.r_a = -0.0148               # Return on assets
+        par.r_d = 0.11                  # Interest rate
         par.lambdaa = 0.03              # Installment
         par.varphi = 0.74               # Credit constraint - income
         par.eta = 0.8                   # Credit constraint - net assets
@@ -104,36 +104,20 @@ class model_bufferstock():
 
     def utility(self,c):
 
-        return (c**(1-self.par.rho)/(1-self.par.rho))
-        ''' Choice set for debt '''
+        return (((c)**(1-self.par.rho))/(1-self.par.rho))
 
-        par = self.par
-
-        if grid_points is None:
-            x = int(not(u)) 
-            lower = max(-n_bar, 0) 
-            upper = max(d_bar, x * par.eta * n_bar)
-            grid_d = np.linspace(lower, upper, par.N)
-        else:
-            x = int(not(u)) 
-            lower = max(-n_bar, 0) 
-            upper = max(d_bar, x * par.eta * n_bar)
-            grid_d = np.linspace(lower, upper, grid_points) # Used for state spaces
-
-        return grid_d
-    
     def grid_c(self,n_bar,d,grid_points=None):
         ''' Choice set for consumption '''
 
         par = self.par
 
         if grid_points is None:
-            lower = 0
-            upper = max(0,n_bar + d)
+            lower = 1e-8
+            upper = max(1e-8,n_bar + d)
             grid_c = np.linspace(lower, upper, par.N)
         else:
-            lower = 0
-            upper = max(0,n_bar + d)
+            lower = 1e-8
+            upper = max(1e-8,n_bar + d)
             grid_c = np.linspace(lower, upper, grid_points) # Used for state spaces
 
         return grid_c
@@ -145,12 +129,12 @@ class model_bufferstock():
 
         if grid_points is None:
             x = int(not(u)) 
-            lower = 0 
+            lower = 1e-8
             upper = max(d_bar, x * (par.eta * n_bar + par.varphi))
             grid_d = np.linspace(lower, upper, par.N)
         else:
             x = int(not(u)) 
-            lower = 0
+            lower = 1e-8
             upper = max(d_bar, x * (par.eta * n_bar + par.varphi))
             grid_d = np.linspace(lower, upper, grid_points) # Used for state spaces
 

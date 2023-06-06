@@ -22,7 +22,7 @@ class model_bufferstock():
         par = self.par
 
         # Preferences
-        par.T = 5              # Terminal age
+        par.T = 5               # Terminal age
         par.beta = 0.90         # Discount factor
         par.rho = 3             # CRRA risk aversion
 
@@ -128,7 +128,7 @@ class model_bufferstock():
         
         # Cash on hand, consumption and assets
         m_ = (1 + par.r_w)*w_old - installment - interest + par.Gamma
-        m = np.clip(m_, a_min=0, a_max=None) # Kan vi bare ignorere negative værdier?
+        m = np.clip(m_, a_min=0, a_max=None)
         
         w = (m + d_next - remaining_debt)/par.Gamma
         
@@ -159,7 +159,6 @@ class model_bufferstock():
                    
             # Final expected value next as weighted average
             V_next = par.credit_con * V_next_unemp + (1-par.credit_con) * V_next_emp
-
 
         # Maximize Bellman equation
         V_guess = c**(1-par.rho)/(1-par.rho) + par.beta * V_next
